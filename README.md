@@ -31,9 +31,9 @@ service worker) pour noter ses séries au téléphone, à la salle, même sans r
   la sélectionne pour les gros boutons ±2,5 / ±1 : une ligne prévue se règle (les suivantes suivent la
   charge), une série faite se corrige en place, avec sa réserve. « + une série » en ajoute une prévue.
 - **Pendant la séance** : avancement (séries faites sur prévues, durée), séries restantes en pointillé à la
-  charge prévue, étiquettes du muscle (avec sa fatigue) et du record. Sous le minuteur de repos, « Il en restait
-  combien ? » (0 à 4+, facultatif) : la réserve est écrite `@N` dans seances.md. L'écran clignote à la fin du
-  repos. Glisser une série vers la gauche la retire (Annuler), vers la droite la recopie.
+  charge prévue, étiquettes du muscle (avec sa fatigue) et du record. Sous le minuteur de repos, « Combien tu aurais
+  pu en faire de plus ? » (0 à 4+, facultatif) : la réserve est écrite `@N` dans seances.md. L'écran clignote à la fin du
+  repos ; carnet en arrière-plan, une notification la signale (service worker, sans serveur, repos de 5 min au plus). Glisser une série vers la gauche la retire (Annuler), vers la droite la recopie.
 - **Cible** : double progression, comme le panneau ; deux crans si tout est tenu avec 3 en réserve ; trois
   séances sans progrès : décharge à −10 % signalée par le PC, puis on remonte.
 - **Récupération par muscle** : 8 séries difficiles font une dose, effacée de moitié en 24 h (bras, épaules),

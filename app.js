@@ -412,7 +412,7 @@ function dessiner() {
           <span class="val">${kg(ls.c)}</span><button data-pas="1">+1</button><button data-pas="2.5">+2,5</button></div>
         <div class="rangee"><label>reps</label><button data-reps="-1">−</button><span class="val">${ls.r}</span><button data-reps="1">+</button></div>`;
         if (ls.fait)
-          h += `<div class="reserve"><span class="sous">Il en restait combien ?</span>${[0, 1, 2, 3, 4].map((k) => `<button data-reserve="${k}" class="${ls.e === k ? "choisi" : ""}">${k === 4 ? "4+" : k}</button>`).join("")}</div>
+          h += `<div class="reserve"><span class="sous">Combien tu aurais pu en faire de plus ?</span>${[0, 1, 2, 3, 4].map((k) => `<button data-reserve="${k}" class="${ls.e === k ? "choisi" : ""}">${k === 4 ? "4+" : k}</button>`).join("")}</div>
             <div class="deux"><button class="gros danger" data-retirer>Retirer</button><button class="gros" data-deselect>OK</button></div>`;
         else if (ks === k0) h += `<button class="gros" data-valider>Série ${ks + 1} ✓</button>`;
         else h += `<button class="gros secondaire" data-deselect>OK</button>`;
@@ -1078,14 +1078,22 @@ function lancerRepos(nom, quoi, cible) {
   const duree = reposDe(nom);
   minu = { nom, quoi, cible, duree, fin: Date.now() + duree * 1000, restant: null, mode: "repos" };
   sonne = false; garder(); ecranAllume();
+  if (window.Notification?.permission === "default") Notification.requestPermission();   // une fois, au premier repos
 }
 function finExercice(nom) {
   minu = { nom, quoi: `${nom} : terminé ✓`, cible: "Repos libre le temps de changer de machine", duree: 0, fin: 0, restant: null, mode: "fin" };
   garder();
   setTimeout(() => { if (minu?.mode === "fin" && minu.nom === nom) arreterRepos(); }, 12000);
 }
-function garder() { ecrire("carnet:minuteur", minu); clearInterval(tic); tic = setInterval(majRepos, 250); majRepos(); }
-function arreterRepos() { minu = null; localStorage.removeItem("carnet:minuteur"); clearInterval(tic); $("#minuteur").className = "minuteur"; }
+function garder() { ecrire("carnet:minuteur", minu); clearInterval(tic); tic = setInterval(majRepos, 250); majRepos(); prevenirSW(); }
+function arreterRepos() { minu = null; localStorage.removeItem("carnet:minuteur"); clearInterval(tic); $("#minuteur").className = "minuteur"; prevenirSW(); }
+// La fin du repos en notification, pour qui passe sur une autre appli entre deux séries : la page en
+// arrière-plan ne sonne plus, le service worker si (Chrome le garde en vie jusqu'à 5 min). Sans serveur.
+// Chaque changement du minuteur (pause, ±15 s, Passer) remplace ou annule la fin annoncée.
+function prevenirSW() {
+  const fin = minu?.mode === "repos" && minu.restant == null && minu.fin > Date.now() ? minu.fin : null;
+  navigator.serviceWorker?.controller?.postMessage({ repos: fin, quoi: [minu?.quoi, minu?.cible].filter(Boolean).join(" · ") });
+}
 
 function majRepos() {
   const el = $("#minuteur");
@@ -1118,11 +1126,11 @@ function majRepos() {
 }
 
 function majEffort() {
-  // « Il en restait combien ? » sous le minuteur, pour la série qui vient d'être faite. Facultatif :
+  // « Combien tu aurais pu en faire de plus ? » (la réserve) sous le minuteur, pour la série qui vient d'être faite. Facultatif :
   // la réserve affine la cible et la récupération ; sans réponse, la série compte comme difficile.
   const el = $("#min-effort"), ef = minu?.effort;
   const x = ef ? seanceDuJour().exos.find((e) => e.nom === ef.nom)?.series?.[ef.i] : null;
-  const html = x ? `<span>Il en restait combien ?</span>${[0, 1, 2, 3, 4].map((k) =>
+  const html = x ? `<span>Combien tu aurais pu en faire de plus ?</span>${[0, 1, 2, 3, 4].map((k) =>
     `<button data-effort="${k}" class="${x.e === k ? "choisi" : ""}">${k === 4 ? "4+" : k}</button>`).join("")}` : "";
   if (el.dataset.html !== html) { el.innerHTML = html; el.dataset.html = html; }
 }

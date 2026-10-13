@@ -1,6 +1,6 @@
 // Hors ligne : l'appli elle-même vient du cache (la salle capte mal), les appels à la base
 // passent toujours par le réseau — les séances en attente sont gardées par app.js.
-const VERSION = "carnet-v12";
+const VERSION = "carnet-v13";
 const FICHIERS = ["./", "index.html", "app.js", "fiches.js", "corps.js", "manifest.webmanifest", "icon.svg", "icon-192.png", "icon-512.png"];
 // Les photos des fiches d'exercice (~1 Mo), en cache dès l'installation : la salle capte mal.
 const IMAGES = [
@@ -77,4 +77,35 @@ self.addEventListener("fetch", (e) => {
       .then((r) => { const copie = r.clone(); caches.open(VERSION).then((c) => c.put(e.request, copie)); return r; })
       .catch(() => caches.match(e.request, { ignoreSearch: true }).then((r) => r || caches.match("index.html")))
   );
+});
+
+// Fin du repos (envoyée par la page à chaque changement du minuteur) : notifiée si le carnet n'est pas à
+// l'écran, sinon la page sonne elle-même. Une nouvelle fin, ou une fin nulle, remplace l'attente en cours.
+let attente = null;
+self.addEventListener("message", (e) => {
+  if (!e.data || !("repos" in e.data)) return;
+  attente?.annuler();
+  attente = null;
+  if (!e.data.repos) return;
+  const moi = {};
+  const fini = new Promise((ok) => {
+    const t = setTimeout(() => ok(true), Math.max(0, e.data.repos - Date.now()));
+    moi.annuler = () => { clearTimeout(t); ok(false); };
+  });
+  attente = moi;
+  e.waitUntil(fini.then(async (sonner) => {
+    if (attente === moi) attente = null;
+    if (!sonner) return;
+    const pages = await self.clients.matchAll({ type: "window" });
+    if (pages.some((c) => c.visibilityState === "visible")) return;
+    await self.registration.showNotification("Repos fini", {
+      body: e.data.quoi || "", tag: "repos", renotify: true, icon: "icon-192.png", vibrate: [300, 150, 300, 150, 300],
+    });
+  }));
+});
+
+// Toucher la notification ramène au carnet.
+self.addEventListener("notificationclick", (e) => {
+  e.notification.close();
+  e.waitUntil(self.clients.matchAll({ type: "window" }).then((cs) => (cs[0] ? cs[0].focus() : self.clients.openWindow("./"))));
 });

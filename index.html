@@ -18,6 +18,8 @@
   html, body { margin: 0; background: var(--bg); color: var(--texte);
     font: 16px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
   body { padding: env(safe-area-inset-top) 16px calc(96px + env(safe-area-inset-bottom)); }
+  /* Minuteur ouvert : assez de place sous la page pour faire défiler la saisie au-dessus de lui. */
+  body:has(.minuteur.actif) { padding-bottom: calc(300px + env(safe-area-inset-bottom)); }
   header { display: flex; align-items: baseline; justify-content: space-between; padding: 14px 0 6px; }
   h1 { font-size: 26px; margin: 0; }
   .etat { font-size: 13px; color: var(--doux); }
