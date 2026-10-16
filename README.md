@@ -1,6 +1,6 @@
-# Carnet
+# FitTracking
 
-Carnet de musculation personnel : une PWA sans framework ni build (une page, un script, un
+Carnet de musculation personnel (anciennement « carnet ») : une PWA sans framework ni build (une page, un script, un
 service worker) pour noter ses séries au téléphone, à la salle, même sans réseau.
 
 - **Données** : une base Supabase, fermée. Quatre fonctions SQL (`carnet_lire`, `carnet_ecrire`,
@@ -62,4 +62,6 @@ service worker) pour noter ses séries au téléphone, à la salle, même sans r
 - **Photos de suivi** : redimensionnées sur le téléphone (1280 px, JPEG), déposées dans une table de
   transit ; le PC les range dans son dossier puis les efface de la base.
 
-Publié par GitHub Pages depuis `main`.
+Publié par GitHub Pages depuis `main` : https://brucemong.github.io/FitTracking/ (le dépôt s'appelait `carnet`
+jusqu'au 2026-10-16). Les noms internes gardent « carnet », pour ne rien perdre : clés du `localStorage`
+(`carnet:*`), fonctions et base Supabase (`carnet_*`), `carnet-sync` côté PC.

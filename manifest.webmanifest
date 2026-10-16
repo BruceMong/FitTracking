@@ -1,6 +1,6 @@
 {
-  "name": "Carnet de musculation",
-  "short_name": "Carnet",
+  "name": "FitTracking",
+  "short_name": "FitTracking",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
