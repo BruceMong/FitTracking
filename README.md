@@ -27,9 +27,19 @@ service worker) pour noter ses séries au téléphone, à la salle, même sans r
   (clé = nom exact de `sante/sport/exercices.md`), photos de free-exercise-db (domaine public) dans
   `fiches/`, mises en cache à l'installation pour marcher sans réseau.
 - **Saisie en lignes** (sur le modèle d'openGym) : carte ouverte, une ligne par série, faites puis prévues,
-  pré-remplies (la cible, puis la ligne d'avant). Le rond de la prochaine ligne la valide. Toucher une ligne
-  la sélectionne pour les gros boutons ±2,5 / ±1 : une ligne prévue se règle (les suivantes suivent la
-  charge), une série faite se corrige en place, avec sa réserve. « + une série » en ajoute une prévue.
+  pré-remplies (la cible, puis la ligne d'avant). Chaque ligne a ses − / + : la charge au pas de l'exercice (le plus
+  petit écart entre deux charges déjà notées, un cran de machine ; 2,5 kg sans historique), les répétitions une par une,
+  et un champ pour taper la valeur. Une ligne prévue réglée fait suivre les suivantes ; une série faite se corrige en
+  place. Le rond de la prochaine ligne la valide ; « @? » d'une série faite ouvre sa réserve et « Retirer ».
+- **Échauffement** : « + échauffement » ajoute une ligne `é` (la moitié de la charge × 10, puis les trois quarts × 5),
+  repos d'une minute. Gardé à part (`ech`), écrit entre parenthèses dans seances.md : hors volume, récupération et cible.
+- **Hors progression** : un exercice, ou toute la séance, un jour de douleur ou sans forme. Compté pour le volume et la
+  récupération, pas pour la cible, les records ni les courbes (`(hors progression)` dans seances.md, lu par le panneau).
+- **Remplacer** (machine prise) : les exercices du même muscle d'abord ; le remplaçant prend la place dans la séance.
+- **Bilan de la séance** (sous les exercices) : chaque exercice face à la dernière fois (↑ = ↓), la cible de la
+  prochaine séance tirée de la même règle, les records battus, séries et durée.
+- **Jour excusé** : sans séance, « malade · voyage · blessure · fatigue · autre » et un mot ; `carnet-sync` l'écrit dans
+  `sante/sport/excuses.md`. Le jour ne compte pas comme manqué (jambes il y a N jours, série de semaines), hachuré au calendrier.
 - **Pendant la séance** : avancement (séries faites sur prévues, durée), séries restantes en pointillé à la
   charge prévue, étiquettes du muscle (avec sa fatigue) et du record. Sous le minuteur de repos, « Combien tu aurais
   pu en faire de plus ? » (0 à 4+, facultatif) : la réserve est écrite `@N` dans seances.md. L'écran clignote à la fin du
@@ -43,7 +53,10 @@ service worker) pour noter ses séries au téléphone, à la salle, même sans r
 - **Silhouette** (Progrès) : séries de la semaine par muscle ou récupération, sur les tracés de
   [MuscleMap](https://github.com/melihcolpan/MuscleMap) (licence MIT, reproduite en tête de `corps.js`). Et
   l'équilibre tirer / pousser sur 4 semaines (posture, épaule droite).
-- **Progrès** : calendrier des séances, séries par semaine, courbe de chaque exercice (1RM estimé,
+- **Progrès** : calendrier des séances sur 26 semaines et série de semaines tenues (3 séances, un jour excusé compte),
+  séries par semaine, courbes de chaque exercice (1RM estimé, charge, et série par série : une ligne par numéro de série,
+  pour voir celle où l'on décroche), douleur à l'épaule, allure de course. Silhouette en trois modes : volume,
+  récupération, muscles négligés (jours depuis la dernière série). Santé : le poids en moyenne par semaine.
   charge), douleur à l'épaule, allure de course.
 - Les courbes sont en SVG écrit à la main, sans bibliothèque, pour marcher hors ligne.
 - **Photos de suivi** : redimensionnées sur le téléphone (1280 px, JPEG), déposées dans une table de

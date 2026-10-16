@@ -14,7 +14,8 @@ import { CORPS } from "./corps.js";
 
 const URL_API = "https://vesdcipjplvgdwfsvefq.supabase.co/rest/v1/rpc/";
 const PUBLIQUE = "sb_publishable_6sYHfOdCG9m-xAkfm8Zcwg_7F4ZKu2c";
-const TYPES = ["push", "pull", "legs", "autre"];
+// « posture » : hors rotation, pour les jours de repos ou en fin de séance (exercices tirés des reels).
+const TYPES = ["push", "pull", "legs", "posture", "autre"];
 const JOURS = ["dimanche", "lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi"];
 
 const $ = (s) => document.querySelector(s);
@@ -70,13 +71,17 @@ function toutesSeances() {
   return Object.values(parJour).sort((a, b) => b.jour.localeCompare(a.jour));
 }
 
+// « Hors progression » (jour de douleur, sans forme) : la séance compte pour le volume et la
+// récupération, pas pour la cible ni les courbes. Toute la séance (s.hp) ou un exercice (e.hp).
+const horsProg = (s, e) => !!(s?.hp || e?.hp);
+
 function derniereFois(nom) {
   // La dernière fois avant aujourd'hui : séances du téléphone, ou historique calculé par le PC
   // (qui connaît aussi les séances racontées à Claude) — la plus récente des deux.
   let mieux = null;
   for (const s of toutesSeances()) {
     if (s.jour >= jour) continue;
-    const e = s.exos?.find((x) => x.nom === nom && x.series?.length);
+    const e = s.exos?.find((x) => x.nom === nom && x.series?.length && !horsProg(s, x));
     if (e) { mieux = { jour: s.jour, series: e.series.map((x) => [x.c, x.r]), rir: e.series.map((x) => x.e ?? null), cran: e.cran }; break; }
   }
   const h = ctx?.historique?.[nom];
@@ -131,7 +136,8 @@ function lignesDe(nom) {
   const faites = e?.series || [];
   const der = derniereFois(nom), ci = der ? cible(der, nom) : null;
   const n = ctx?.schema?.series || 4;
-  const st = (saisie[nom] ||= { edits: {}, extra: 0 });
+  const st = (saisie[nom] ||= { edits: {}, extra: 0, ech: 0, echEdits: {} });
+  st.echEdits ||= {}; st.ech ||= 0;
   let prec = faites.length ? { c: faites[faites.length - 1].c, r: faites[faites.length - 1].r }
     : { c: ci?.c ?? der?.series?.[0]?.[0] ?? 20, r: ci?.r ?? ctx?.schema?.reps ?? 8 };
   const L = faites.map((x, k) => ({ k, c: x.c, r: x.r, e: x.e, fait: true }));
@@ -141,8 +147,31 @@ function lignesDe(nom) {
     L.push({ k, c: prec.c, r: prec.r, fait: false });
   }
   const k0 = faites.length;   // la prochaine série
-  const ks = choisie?.[0] === nom && L.some((l) => l.k === choisie[1]) ? choisie[1] : (L.some((l) => l.k === k0) ? k0 : null);
-  return { e, L, k0, ks, der, ci, n, st };
+  // L'échauffement : à part (e.ech), hors séries, volume, récupération et cible. Une ligne prévue
+  // part de la moitié de la charge de travail × 10, puis des trois quarts × 5, au pas de l'exercice.
+  const pas = pasDe(nom), travail = L[0]?.c || 0;
+  const faitsE = e?.ech || [];
+  const W = faitsE.map((x, k) => ({ k, c: x.c, r: x.r, fait: true }));
+  for (let j = 0; j < st.ech; j++) {
+    const k = faitsE.length + j, base = [[0.5, 10], [0.75, 5]][Math.min(k, 1)];
+    const auto = { c: travail ? Math.max(0, Math.round(travail * base[0] / pas) * pas) : 0, r: base[1] };
+    W.push({ k, ...auto, ...(st.echEdits[k] || {}), fait: false });
+  }
+  const ks = choisie?.[0] === nom && L.some((l) => l.k === choisie[1] && l.fait) ? choisie[1] : null;
+  return { e, L, W, k0, ks, der, ci, n, st, pas };
+}
+
+// Le pas des boutons − / + d'un exercice : le plus petit écart entre deux charges déjà notées (un
+// cran de machine, 32 → 39 ; des haltères, 10 → 12), 2,5 kg sans historique. Le champ prend le reste.
+function pasDe(nom) {
+  const cs = new Set();
+  for (const s of toutesSeances()) for (const e of s.exos || []) if (e.nom === nom) for (const x of e.series || []) if (x.c > 0) cs.add(x.c);
+  for (const [c] of ctx?.historique?.[nom]?.series || []) if (c > 0) cs.add(c);
+  for (const p of ctx?.progres?.[nom] || []) for (const [c] of p[3] || []) if (c > 0) cs.add(c);
+  const v = [...cs].sort((a, b) => a - b);
+  let pas = Infinity;
+  for (let i = 1; i < v.length; i++) pas = Math.min(pas, v[i] - v[i - 1]);
+  return pas >= 0.5 && pas <= 10 ? Math.round(pas * 4) / 4 : 2.5;
 }
 
 // Une série faite retirée ou ajoutée décale les lignes prévues qui suivent, et leurs réglages.
@@ -157,7 +186,7 @@ function retirerSerie(nom, i) {
   if (!e?.series?.[i]) return;
   const [serie] = e.series.splice(i, 1);
   const ordre = s.exos.indexOf(e);
-  if (!e.series.length) s.exos = s.exos.filter((z) => z !== e);
+  if (!e.series.length && !e.ech?.length && !e.note && !e.hp) s.exos = s.exos.filter((z) => z !== e);
   decaler(nom, i, -1);
   annulation = { nom, i, serie, ordre };
   toast(`Série ${kg(serie.c)}×${serie.r} retirée`, true);
@@ -209,7 +238,8 @@ function seriesGroupes() {
     const j = (out[s.jour] = {});
     for (const e of s.exos) {
       const g = groupeDe(e.nom);
-      if (g && g !== "cardio" && e.series?.length) j[g] = (j[g] || 0) + e.series.length;
+      // Cardio et mobilité ne chargent pas un muscle : hors silhouette, comme sur le PC.
+      if (g && g !== "cardio" && g !== "mobilité" && e.series?.length) j[g] = (j[g] || 0) + e.series.length;
     }
   }
   return out;
@@ -313,7 +343,10 @@ function seanceDuJour() {
 }
 
 function exosAffiches(d) {
-  const prevus = (ctx?.programme?.[d.type] || []).slice();
+  // Un exercice remplacé (machine prise) cède sa place au remplaçant, tant qu'il n'a pas de série.
+  const rempl = d.remplace || {};
+  const prevus = [...new Set((ctx?.programme?.[d.type] || []).map((n) =>
+    rempl[n] && !d.exos.find((x) => x.nom === n)?.series?.length ? rempl[n] : n))];
   for (const e of d.exos) if (!prevus.includes(e.nom)) prevus.push(e.nom);
   return prevus;
 }
@@ -341,14 +374,15 @@ function dessiner() {
   } else if (p === "repos") {
     h += `<div class="carte conseil"><b>Repos selon la rotation</b>Posture et étirements sur le tapis.</div>`;
   }
+  if (s.excuse) h += `<div class="carte conseil"><b>Jour excusé : ${esc(s.excuse.tag)}</b>Ne compte pas comme un jour manqué.</div>`;
   h += `<div class="types">${TYPES.map((t) => `<button data-type="${t}" class="${t === s.type ? "choisi" : ""}">${t}${t === p ? " ·" : ""}</button>`).join("")}</div>`;
   const nSeries = ctx?.schema?.series || 4;
   const faitesTot = s.exos.reduce((a, e) => a + (e.series?.length || 0), 0);
+  let duree = "";
   if (faitesTot) {
     // Avancement de la séance : séries faites sur séries prévues, et durée depuis la première.
     const prevues = Math.max(faitesTot, exosAffiches(s).length * nSeries);
-    const ts = s.exos.flatMap((e) => (e.series || []).map((x) => x.t)).filter(Boolean).sort();
-    let duree = "";
+    const ts = s.exos.flatMap((e) => [...(e.series || []), ...(e.ech || [])].map((x) => x.t)).filter(Boolean).sort();
     if (ts.length) {
       const enMin = (t) => { const [a, b] = t.split(":").map(Number); return a * 60 + b; };
       const n = new Date(), maint = n.getHours() * 60 + n.getMinutes();
@@ -370,10 +404,8 @@ function dessiner() {
   for (const nom of exosAffiches(s)) {
     const e = s.exos.find((x) => x.nom === nom);
     const faites = e?.series || [];
-    const der = derniereFois(nom);
-    const ci = der ? cible(der, nom) : null;
-    const n = ctx?.schema?.series || 4;
-    const { L, k0, ks } = lignesDe(nom);
+    const { L, W, k0, ks, der, ci, n, pas } = lignesDe(nom);
+    const hp = horsProg(s, e);
     h += `<div class="carte exo ${ouvert === nom ? "ouvert" : ""} ${faites.length >= n ? "fait" : ""}" data-exo="${esc(nom)}">
       <h3 data-ouvrir="${esc(nom)}"><span class="nom">${esc(nom)}${FICHES[nom] ? `<button class="info" data-fiche="${esc(nom)}" aria-label="Fiche de l'exercice">i</button>` : ""}</span><span class="n">${faites.length}/${n}</span></h3>`;
     if (der) h += `<div class="sous">${jj(der.jour)} : ${esc(formatSeries(der.series))}</div>`;
@@ -383,46 +415,68 @@ function dessiner() {
     if (g) tg.push(`<span class="tag ${rc[g] != null ? etatRecup(rc[g]) : ""}">${esc(g)}${rc[g] >= 0.25 ? ` · ${Math.round(rc[g] * 100)} %` : ""}</span>`);
     if (rec?.charge) tg.push(`<span class="tag">record ${kg(rec.charge)} kg</span>`);
     else if (rec?.reps) tg.push(`<span class="tag">record ${rec.reps} reps</span>`);
+    if (hp) tg.push(`<span class="tag jaune">hors progression</span>`);
     if (tg.length) h += `<div class="tags">${tg.join("")}</div>`;
     const mm = memo(nom);
     if (memoEdite === nom)
       h += `<div class="ligne2"><input id="memo-champ" value="${esc(mm)}" placeholder="cran 15 · siège 3 · prise large…"><button data-memo-ok>OK</button></div>`;
     else if (mm || ouvert === nom)
       h += `<div class="memo" data-memo="${esc(nom)}">📌 ${mm ? esc(mm) : "<i>ajouter un mémo de réglage</i>"}</div>`;
-    if (ci) h += `<div class="cible ${ci.monte ? "monte" : ""} ${ci.decharge ? "decharge" : ""}">→ ${esc(ci.texte)}</div>`;
+    if (hp) h += `<div class="cible">→ aujourd'hui ne compte pas : la cible reste celle de la dernière fois</div>`;
+    else if (ci) h += `<div class="cible ${ci.monte ? "monte" : ""} ${ci.decharge ? "decharge" : ""}">→ ${esc(ci.texte)}</div>`;
     if (e?.note && ouvert !== nom) h += `<div class="remarque">✎ ${esc(e.note)}</div>`;
-    const fmtL = (l) => `${l.c === 0 ? "pdc" : `${kg(l.c)} kg`} × ${l.r}`;
     if (ouvert !== nom) {
-      // Carte fermée : le résumé en puces, faites puis prévues (pointillé). Toucher une puce ouvre sa ligne.
-      if (L.length) h += `<div class="series">${L.map((l) => l.fait
+      // Carte fermée : le résumé en puces, échauffement, faites puis prévues (pointillé). Toucher une puce ouvre la carte.
+      const echF = (e?.ech || []).map((x) => `<span class="serie ech" data-ligne="0" data-nom="${esc(nom)}">é ${kg(x.c)}×${x.r}</span>`).join("");
+      if (L.length || echF) h += `<div class="series">${echF}${L.map((l) => l.fait
         ? `<span class="serie" data-ligne="${l.k}" data-nom="${esc(nom)}">${kg(l.c)}×${l.r}${l.e != null ? `<small>@${l.e}</small>` : ""}</span>`
         : `<span class="prevue" data-ligne="${l.k}" data-nom="${esc(nom)}">${kg(l.c)}×${l.r}</span>`).join("")}</div>`;
     } else {
-      // Carte ouverte : une ligne par série. Le rond de la prochaine série la valide ; toucher une ligne
-      // la sélectionne pour la régler (prévue) ou la corriger (faite) avec les boutons du dessous.
+      // Carte ouverte : une ligne par série, chacune avec ses − / + (charge au pas de l'exercice,
+      // répétitions) et son champ ; le rond de la prochaine la valide. Comme dans openGym : pas de
+      // ligne à sélectionner avant de régler. La réserve d'une série faite se touche pour la corriger.
       // Glisser une série faite vers la gauche la retire (Annuler), vers la droite la recopie.
-      h += `<div class="lignes-series">${L.map((l) => `<div class="ls ${l.fait ? "fait" : l.k === k0 ? "prochaine" : "prevue"} ${l.k === ks ? "sel" : ""}" data-ligne="${l.k}" data-nom="${esc(nom)}">
-          <span class="ls-n">${l.k + 1}</span><span class="ls-v">${fmtL(l)}</span><span class="ls-e">${l.e != null ? `${l.e === 4 ? "4+" : l.e} en réserve` : ""}</span>
-          ${l.fait ? `<span class="ls-ok fait">✓</span>` : l.k === k0 ? `<button class="ls-ok" data-cocher aria-label="Valider la série ${l.k + 1}"></button>` : `<span class="ls-ok vide"></span>`}</div>`).join("")}</div>`;
-      const ls = L.find((l) => l.k === ks);
+      const k0e = W.findIndex((w) => !w.fait);
+      const ligne = (l, ech) => {
+        const suivante = ech ? l.k === k0e : l.k === k0;
+        const cls = l.fait ? "fait" : suivante ? "prochaine" : "prevue";
+        const fin = l.fait ? `<span class="ls-ok fait">✓</span>`
+          : suivante ? `<button class="ls-ok" ${ech ? "data-cocher-ech" : "data-cocher"} aria-label="Valider ${ech ? "l'échauffement" : `la série ${l.k + 1}`}"></button>`
+          : `<span class="ls-ok vide"></span>`;
+        const res = ech ? (l.fait ? `<button class="ls-e" data-ech-retirer aria-label="Retirer l'échauffement">×</button>` : `<span></span>`)
+          : l.fait ? `<button class="ls-e ${l.e != null ? "note" : ""}" data-res aria-label="Réserve">${l.e != null ? `@${l.e === 4 ? "4+" : l.e}` : "@?"}</button>` : `<span></span>`;
+        return `<div class="ls ${cls} ${ech ? "ech" : ""} ${!ech && l.k === ks ? "sel" : ""}" data-ligne="${l.k}" data-nom="${esc(nom)}" ${ech ? 'data-ech="1"' : ""}>
+          <span class="ls-n">${ech ? "é" : l.k + 1}</span>
+          <span class="pm"><button data-pm="c" data-d="-1" aria-label="moins ${kg(pas)} kg">−</button><input data-champ="c" inputmode="decimal" enterkeyhint="done" value="${l.c ? kg(l.c) : ""}" placeholder="pdc" aria-label="charge en kg"><button data-pm="c" data-d="1" aria-label="plus ${kg(pas)} kg">+</button></span>
+          <span class="pm"><button data-pm="r" data-d="-1" aria-label="une répétition de moins">−</button><input data-champ="r" inputmode="numeric" enterkeyhint="done" value="${l.r}" aria-label="répétitions"><button data-pm="r" data-d="1" aria-label="une répétition de plus">+</button></span>
+          ${res}${fin}</div>`;
+      };
+      h += `<div class="ls-tete"><span></span><span>kg · pas ${kg(pas)}</span><span>reps</span><span>rés.</span><span></span></div>
+        <div class="lignes-series">${W.map((l) => ligne(l, true)).join("")}${L.map((l) => ligne(l, false)).join("")}</div>`;
       h += `<div class="saisie">`;
-      if (ls) {
-        h += `<div class="sous sel-titre">${ls.fait ? `Série ${ks + 1}, faite : corriger` : ks === k0 ? `Série ${ks + 1}` : `Série ${ks + 1}, prévue`}</div>
-        <div class="rangee"><label>kg</label><button data-pas="-2.5">−2,5</button><button data-pas="-1">−1</button>
-          <span class="val">${kg(ls.c)}</span><button data-pas="1">+1</button><button data-pas="2.5">+2,5</button></div>
-        <div class="rangee"><label>reps</label><button data-reps="-1">−</button><span class="val">${ls.r}</span><button data-reps="1">+</button></div>`;
-        if (ls.fait)
-          h += `<div class="reserve"><span class="sous">Combien tu aurais pu en faire de plus ?</span>${[0, 1, 2, 3, 4].map((k) => `<button data-reserve="${k}" class="${ls.e === k ? "choisi" : ""}">${k === 4 ? "4+" : k}</button>`).join("")}</div>
-            <div class="deux"><button class="gros danger" data-retirer>Retirer</button><button class="gros" data-deselect>OK</button></div>`;
-        else if (ks === k0) h += `<button class="gros" data-valider>Série ${ks + 1} ✓</button>`;
-        else h += `<button class="gros secondaire" data-deselect>OK</button>`;
-      }
+      const ls = L.find((l) => l.k === ks);
+      if (ls) h += `<div class="sous sel-titre">Série ${ks + 1} : combien tu aurais pu en faire de plus ?</div>
+        <div class="reserve"><span></span>${[0, 1, 2, 3, 4].map((k) => `<button data-reserve="${k}" class="${ls.e === k ? "choisi" : ""}">${k === 4 ? "4+" : k}</button>`).join("")}</div>
+        <div class="deux"><button class="gros danger" data-retirer>Retirer</button><button class="gros secondaire" data-deselect>OK</button></div>`;
       h += `<input class="note-exo" data-note-exo value="${esc(e?.note || "")}" placeholder="Note sur l'exercice (sensations, réglage, douleur…)">
-        <button class="lien" data-plus-serie>+ une série</button></div>`;
+        <div class="liens"><button class="lien" data-plus-serie>+ une série</button><button class="lien" data-plus-ech>+ échauffement</button>
+          <button class="lien" data-remplacer>⇄ remplacer</button></div>
+        ${s.hp ? "" : `<button class="lien petit" data-hp>${e?.hp ? "✓ hors progression aujourd'hui · annuler" : "Douleur, pas en forme : ne pas compter pour la progression"}</button>`}</div>`;
     }
     h += `</div>`;
   }
   h += `<button class="lien" id="ajouter">+ Ajouter un exercice</button>`;
+  if (faitesTot) h += `<button class="lien petit" data-hp-seance>${s.hp ? "✓ Toute la séance hors progression · annuler"
+    : "Jour sans (douleur, fatigue) : ne pas compter la séance pour la progression"}</button>`;
+  h += bilan(s, duree);
+  if (!faitesTot) {
+    // Un jour sans séance pour une raison valable : noté, il ne compte pas comme manqué.
+    const ex = s.excuse;
+    h += `<div class="carte"><b>${ex ? "Jour excusé" : "Pas de séance aujourd'hui ?"}</b>
+      <span class="sous">${ex ? "ne compte pas comme un jour manqué" : "note pourquoi : le jour ne comptera pas comme manqué"}</span>
+      <div class="motifs">${MOTIFS.map((m) => `<button data-excuse="${m}" class="${ex?.tag === m ? "choisi" : ""}">${m}</button>`).join("")}</div>
+      ${ex ? `<input id="excuse-texte" value="${esc(ex.texte || "")}" placeholder="Un mot (facultatif) : grippe, déplacement…">` : ""}</div>`;
+  }
   // Épaule droite : la douleur du jour règle la réintroduction des exercices en pause.
   const dl = s.douleur;
   h += `<div class="carte"><b>Épaule droite</b> <span class="sous">douleur aujourd'hui, de 0 à 10</span>
@@ -454,6 +508,48 @@ function formatSeries(series) {
   let prec, out = [];
   for (const [c, r] of series) { out.push(c !== prec ? `${kg(c)}×${r}` : String(r)); prec = c; }
   return out.join(", ");
+}
+
+// 1RM estimé (Epley), comme le panneau : rien au-delà de 12 répétitions ni au poids du corps.
+const e1rm = (c, r) => (c > 0 && r > 0 && r <= 12 ? c * (1 + r / 30) : 0);
+const MOTIFS = ["malade", "voyage", "blessure", "fatigue", "autre"];
+
+// Aujourd'hui face à la dernière fois : la charge la plus haute d'abord, puis les répétitions.
+function tendance(auj, avant) {
+  const haut = (ss) => Math.max(0, ...ss.map((x) => x[0] ?? 0)), reps = (ss) => ss.reduce((a, x) => a + x[1], 0);
+  const d = haut(auj) - haut(avant);
+  return Math.abs(d) > 1e-9 ? Math.sign(d) : Math.sign(reps(auj) - reps(avant));
+}
+
+// Le bilan, sous les exercices dès la première série (comme le résumé de fin d'openGym) : pour chaque
+// exercice, aujourd'hui face à la dernière fois, et ce que la prochaine séance visera, tiré de la même
+// règle que la cible affichée au début. Un record : mieux que toutes les séances d'avant.
+function bilan(s, duree) {
+  const exos = s.exos.filter((e) => e.series?.length);
+  if (!exos.length) return "";
+  let nRec = 0, lignes = "";
+  for (const e of exos) {
+    const auj = e.series.map((x) => [x.c, x.r]), hp = horsProg(s, e), der = derniereFois(e.nom);
+    let top = 0, b1 = 0, connu = false;
+    for (const p of ctx?.progres?.[e.nom] || []) if (p[0] < jour) { top = Math.max(top, p[1]); b1 = Math.max(b1, p[2]); connu = true; }
+    for (const x of toutesSeances()) if (x.jour < jour) for (const y of x.exos || []) if (y.nom === e.nom && y.series?.length && !horsProg(x, y)) {
+      connu = true;
+      for (const z of y.series) { top = Math.max(top, z.c ?? 0); b1 = Math.max(b1, e1rm(z.c, z.r)); }
+    }
+    const tAuj = Math.max(0, ...auj.map((x) => x[0] ?? 0)), bAuj = Math.max(0, ...auj.map((x) => e1rm(x[0], x[1])));
+    const rec = !hp && connu && (tAuj > top + 1e-9 || bAuj > b1 + 0.05);
+    if (rec) nRec++;
+    const tdc = der ? tendance(auj, der.series) : null;
+    const fl = tdc == null ? `<span class="sous">première fois</span>` : tdc > 0 ? `<span class="vert">↑ mieux que le ${jj(der.jour)}</span>`
+      : tdc < 0 ? `<span class="jaune">↓ moins que le ${jj(der.jour)}</span>` : `<span class="sous">= comme le ${jj(der.jour)}</span>`;
+    const ci = hp ? null : cible({ jour, series: auj, rir: e.series.map((x) => x.e ?? null) }, e.nom);
+    lignes += `<div class="b-exo"><div class="j-haut"><b>${esc(e.nom)}</b>${rec ? `<span class="tag vert">record</span>` : ""}</div>
+      <div>${esc(formatSeries(auj))} · ${fl}</div>
+      <div class="sous">${hp ? "hors progression : la prochaine fois reprend la cible d'avant" : ci ? `prochaine fois : ${esc(ci.texte)}` : ""}</div></div>`;
+  }
+  const n = exos.reduce((a, e) => a + e.series.length, 0);
+  return `<div class="carte bilan"><div class="c-tete"><b>Bilan de la séance</b>
+    <span class="sous">${n} séries${duree ? ` · ${duree}` : ""}${nRec ? ` · ${nRec} record${nRec > 1 ? "s" : ""}` : ""}</span></div>${lignes}</div>`;
 }
 
 // ───────────────────────────────────────── l'onglet Progrès
@@ -496,6 +592,39 @@ function courbe(titre, points, { fmt = (v) => String(Math.round(v)), refs = [], 
     · moyenne ${esc(fmt(moy))} · ${vals.length} mesure${vals.length > 1 ? "s" : ""}${legende ? ` · ${esc(legende)}` : ""}</div></div>`;
 }
 
+// Une ligne par numéro de série (1 à 5), d'après openGym : la série où l'on décroche se voit, ce
+// que la charge la plus haute ou le 1RM de la meilleure série cachent. En 1RM estimé de la série
+// (à charge égale, la répétition perdue fait baisser la ligne), en répétitions au poids du corps.
+function courbeParSerie(nom, seances) {
+  const COUL = ["var(--bleu)", "var(--violet)", "var(--vert)", "var(--jaune)", "var(--rouge)"];
+  const ss = seances.filter((p) => p[3]?.length).slice(-20);
+  if (ss.length < 2) return "";
+  const pdc = ss.every((p) => p[3].every(([c]) => !c));
+  const val = ([c, r]) => (pdc ? r : e1rm(c, r) || null);
+  const lignes = COUL.map((coul, i) => ({ coul, n: i + 1, pts: ss.map((p) => [p[0], p[3][i] ? val(p[3][i]) : null]).filter(([, v]) => v) }))
+    .filter((l) => l.pts.length);
+  const vs = lignes.flatMap((l) => l.pts.map((x) => x[1]));
+  let lo = Math.min(...vs), hi = Math.max(...vs);
+  if (hi === lo) { hi += 1; lo -= 1; }
+  const m = (hi - lo) * 0.1; lo -= m; hi += m;
+  const W = 340, H = 140, G = 40, n = ss.length;
+  const X = (i) => G + (n > 1 ? i / (n - 1) : 0.5) * (W - G - 8);   // une séance par cran : les écarts de dates n'y font rien
+  const Y = (v) => 6 + (hi - v) / (hi - lo) * (H - 24);
+  const iDe = Object.fromEntries(ss.map((p, i) => [p[0], i]));
+  let svg = `<svg viewBox="0 0 ${W} ${H}">`;
+  for (const v of [hi - m, lo + m]) svg += `<text x="${G - 4}" y="${Y(v) + 4}" fill="var(--doux)" font-size="10" text-anchor="end">${Math.round(v)}</text>`;
+  for (const l of lignes) {
+    svg += `<path d="${l.pts.map(([d, v], k) => `${k ? "L" : "M"}${X(iDe[d]).toFixed(1)},${Y(v).toFixed(1)}`).join(" ")}" fill="none" stroke="${l.coul}" stroke-width="2" stroke-linejoin="round"/>`;
+    for (const [d, v] of l.pts) svg += `<circle cx="${X(iDe[d]).toFixed(1)}" cy="${Y(v).toFixed(1)}" r="2.5" fill="${l.coul}"/>`;
+  }
+  svg += `<text x="${G}" y="${H - 3}" fill="var(--doux)" font-size="10">${jj(ss[0][0])}</text>`;
+  svg += `<text x="${W - 8}" y="${H - 3}" fill="var(--doux)" font-size="10" text-anchor="end">${jj(ss[n - 1][0])}</text></svg>`;
+  const der = ss[n - 1][3];
+  return `<div class="carte graphe"><h4>${esc(nom)} — série par série</h4>${svg}
+    <div class="legende">${lignes.map((l) => `<span><i style="background:${l.coul}"></i>série ${l.n}</span>`).join("")}</div>
+    <div class="chiffres">${pdc ? "répétitions" : "1RM estimé de chaque série, en kg"} · une séance par point · dernière : ${esc(formatSeries(der))}</div></div>`;
+}
+
 function barresSemaines(semaines) {
   const W = 340, H = 110, hi = Math.max(1, ...semaines.map((s) => s[1])), lb = (W - 10) / semaines.length;
   let svg = `<svg viewBox="0 0 ${W} ${H}">`;
@@ -519,25 +648,54 @@ function muscuParJour() {
   return out;
 }
 
+// Les jours excusés : ceux du PC (excuses.md), recouverts par ceux du téléphone. jour → [motif, note].
+function excuses() {
+  const out = { ...(ctx?.excuses || {}) };
+  for (const s of toutesSeances()) if ("excuse" in s) { if (s.excuse) out[s.jour] = [s.excuse.tag, s.excuse.texte || ""]; else delete out[s.jour]; }
+  return out;
+}
+
+// Une semaine tenue : 3 séances (muscu ou course), un jour excusé valant une séance. La semaine en
+// cours ne casse pas la série tant qu'elle n'est pas finie.
+const SEMAINE_TENUE = 3;
+function serieSemaines(mj, courses, ex, lundi) {
+  const compte = (de) => {
+    let n = 0;
+    for (let k = 0; k < 7; k++) { const iso = new Date(de.getTime() + k * 864e5).toISOString().slice(0, 10); if (mj[iso] || courses.has(iso) || ex[iso]) n++; }
+    return n;
+  };
+  const cette = compte(lundi);
+  let n = cette >= SEMAINE_TENUE ? 1 : 0;
+  for (let k = 1; k < 104 && compte(new Date(lundi - k * 7 * 864e5)) >= SEMAINE_TENUE; k++) n++;
+  return { n, cette };
+}
+
 function progres() {
   const mj = muscuParJour();
   const courses = new Set((ctx?.courses || []).map((c) => c[0]));
-  // Calendrier : 18 semaines, du lundi au dimanche, une colonne par semaine.
+  // Calendrier : 26 semaines, du lundi au dimanche, une colonne par semaine. Un jour excusé (malade,
+  // voyage…) est hachuré : il ne compte pas comme manqué.
+  const ex = excuses();
   const fin = new Date(jour);
   const lundi = new Date(fin - ((fin.getDay() + 6) % 7) * 864e5);
-  const debut = new Date(lundi - 17 * 7 * 864e5);
+  const debut = new Date(lundi - 25 * 7 * 864e5);
   let cases = "";
   for (let d = new Date(debut); d <= new Date(lundi.getTime() + 6 * 864e5); d = new Date(d.getTime() + 864e5)) {
     const iso = d.toISOString().slice(0, 10);
-    const t = mj[iso]?.type || (courses.has(iso) ? "course" : "");
-    cases += `<span class="${t} ${iso === jour ? "auj" : ""}" title="${iso}"></span>`;
+    const t = mj[iso]?.type || (courses.has(iso) ? "course" : ex[iso] ? "excuse" : "");
+    cases += `<span class="${t} ${iso === jour ? "auj" : ""}" title="${iso}${ex[iso] ? ` · ${esc(ex[iso][0])}` : ""}"></span>`;
   }
   const n30 = Object.keys(mj).filter((d) => (fin - new Date(d)) / 864e5 < 30).length;
   const legs = Object.entries(mj).filter(([, x]) => x.type === "legs").map(([d]) => d).sort();
-  let h = `<div class="carte"><b>Régularité</b> <span class="sous">${n30} séances sur 30 jours${legs.length ? ` · jambes il y a ${Math.round((fin - new Date(legs[legs.length - 1])) / 864e5)} j` : ""}</span>
+  const jl = legs.length ? Math.round((fin - new Date(legs[legs.length - 1])) / 864e5) - Object.keys(ex).filter((d) => d > legs[legs.length - 1] && d <= jour).length : null;
+  const sr = serieSemaines(mj, courses, ex, lundi);
+  let h = `<div class="carte"><b>Régularité</b> <span class="sous">${n30} séances sur 30 jours${jl != null ? ` · jambes il y a ${jl} j` : ""}</span>
+    <div class="streak"><b>${sr.n}</b> semaine${sr.n > 1 ? "s" : ""} d'affilée à ${SEMAINE_TENUE} séances ou plus
+      <span class="sous">· cette semaine ${sr.cette}/${SEMAINE_TENUE}</span></div>
     <div class="cal" style="margin-top:10px">${cases}</div>
     <div class="legende"><span><i style="background:var(--bleu)"></i>push</span><span><i style="background:var(--violet)"></i>pull</span>
-      <span><i style="background:var(--vert)"></i>legs</span><span><i style="background:var(--jaune)"></i>course</span><span><i style="background:var(--doux)"></i>autre</span></div></div>`;
+      <span><i style="background:var(--vert)"></i>legs</span><span><i style="background:var(--jaune)"></i>course</span><span><i style="background:var(--doux)"></i>autre</span>
+      <span><i class="excuse"></i>excusé</span></div></div>`;
 
   // Séries par semaine, 12 semaines.
   const sem = [];
@@ -554,10 +712,11 @@ function progres() {
   const prog = { ...(ctx?.progres || {}) };
   for (const s of toutesSeances()) for (const e of s.exos || []) {
     if (!e.series?.length) continue;
-    const top = Math.max(...e.series.map((x) => x.c ?? 0));
-    const best = Math.max(...e.series.map((x) => (x.c > 0 && x.r <= 12 ? x.c * (1 + x.r / 30) : 0)));
     const l = (prog[e.nom] = (prog[e.nom] || []).filter((p) => p[0] !== s.jour));
-    l.push([s.jour, top, Math.round(best * 10) / 10]);
+    if (horsProg(s, e)) continue;   // hors progression : hors courbes, comme sur le PC
+    const top = Math.max(...e.series.map((x) => x.c ?? 0));
+    const best = Math.max(...e.series.map((x) => e1rm(x.c, x.r)));
+    l.push([s.jour, top, Math.round(best * 10) / 10, e.series.map((x) => [x.c, x.r])]);
   }
   const noms = Object.keys(prog).sort((a, b) => prog[b].length - prog[a].length);
   if (noms.length) {
@@ -568,6 +727,7 @@ function progres() {
       fmt: (v) => `${Math.round(v)} kg`, legende: "d'après la meilleure série" });
     h += courbe(`${exoGraphe} — charge la plus haute`, serie.map((p) => [p[0], p[1]]), { jours: 365, relier: 30, ajuster: true,
       fmt: (v) => `${String(Math.round(v * 2) / 2).replace(".", ",")} kg` });
+    h += courbeParSerie(exoGraphe, serie);
   } else h += `<div class="carte sous">Les courbes de chaque exercice apparaîtront après tes premières séances.</div>`;
 
   // L'épaule et la course : le reste du corps est dans l'onglet Santé.
@@ -613,6 +773,19 @@ function carteCorps(lundi) {
       : "rien de travaillé ces 7 derniers jours";
     legende = `<span><i style="background:var(--rouge)"></i>fatigué</span><span><i style="background:var(--jaune)"></i>presque</span>
       <span><i style="background:var(--vert)"></i>prêt</span><span><i style="background:var(--repos)"></i>pas travaillé</span>`;
+  } else if (modeCorps === "neglige") {
+    // Les muscles laissés de côté (troisième mode d'openGym) : jours depuis la dernière série, sur
+    // 4 semaines. En rotation push / pull / legs, chaque muscle revient au moins une fois par semaine.
+    const der = {};
+    for (const [j, gs] of Object.entries(seriesGroupes())) for (const g of Object.keys(gs)) if (!der[g] || j > der[g]) der[g] = j;
+    const groupes = [...new Set((ctx?.exercices || []).map((x) => x.groupe).filter((g) => ZONES[g]))];
+    const ecart = Object.fromEntries(groupes.map((g) => [g, der[g] ? Math.round((new Date(jour) - new Date(der[g])) / 864e5) : null]));
+    for (const [g, d] of Object.entries(ecart)) couleurs[g] = d == null || d > 13 ? "var(--rouge)" : d > 7 ? "var(--jaune)" : "var(--vert)";
+    const tri = Object.entries(ecart).filter(([, d]) => d == null || d > 7).sort((a, b) => (b[1] ?? 99) - (a[1] ?? 99));
+    detail = tri.length ? tri.map(([g, d]) => `<span class="${d == null || d > 13 ? "rouge" : "jaune"}">${esc(g)} ${d == null ? "plus de 4 semaines" : `${d} j`}</span>`).join(" · ")
+      : "tout a été travaillé cette semaine";
+    legende = `<span><i style="background:var(--vert)"></i>7 j ou moins</span><span><i style="background:var(--jaune)"></i>8-13 j</span>
+      <span><i style="background:var(--rouge)"></i>2 semaines et plus</span>`;
   } else {
     const v = volume(lundi);
     // 10 séries par muscle et par semaine : le bas de la fourchette conseillée pour progresser.
@@ -622,10 +795,11 @@ function carteCorps(lundi) {
     legende = `<span><i style="background:rgba(48,209,88,.3)"></i>1-5</span><span><i style="background:rgba(48,209,88,.6)"></i>6-9</span>
       <span><i style="background:var(--vert)"></i>10 et plus</span><span><i style="background:var(--repos)"></i>0</span>`;
   }
-  return `<div class="carte"><div class="c-tete"><b>${modeCorps === "recup" ? "Récupération" : "Séries de la semaine"}</b>
+  const titre = { recup: "Récupération", neglige: "Muscles négligés" }[modeCorps] || "Séries de la semaine";
+  return `<div class="carte"><div class="c-tete"><b>${titre}</b>
       <span class="sous">par muscle</span></div>
-    <div class="periode"><button data-corps="volume" class="${modeCorps !== "recup" ? "choisi" : ""}">Volume</button>
-      <button data-corps="recup" class="${modeCorps === "recup" ? "choisi" : ""}">Récupération</button></div>
+    <div class="periode">${[["volume", "Volume"], ["recup", "Récupération"], ["neglige", "Négligés"]].map(([m, nom]) =>
+      `<button data-corps="${m}" class="${(modeCorps === m || (m === "volume" && !["recup", "neglige"].includes(modeCorps))) ? "choisi" : ""}">${nom}</button>`).join("")}</div>
     ${silhouette(couleurs)}<div class="legende">${legende}</div><div class="sous" style="margin-top:6px">${detail}</div></div>`;
 }
 
@@ -657,6 +831,28 @@ function pesees() {
   const p = (ctx?.pesees || []).slice();
   for (const s of toutesSeances()) if (s.poids) { const i = p.findIndex((x) => x[0] === s.jour); if (i >= 0) p.splice(i, 1); p.push([s.jour, s.poids]); }
   return p.sort((a, b) => a[0].localeCompare(b[0]));
+}
+
+// Le poids semaine par semaine (d'après openGym) : d'un matin à l'autre il bouge avec l'eau, le sel
+// et le dernier repas plus qu'en un mois ; la moyenne de la semaine est le chiffre à suivre.
+function poidsSemaines(pes) {
+  const sem = {}, depuis = new Date(new Date(jour) - 84 * 864e5).toISOString().slice(0, 10);
+  for (const [d, v] of pes) {
+    if (d < depuis) continue;   // 12 semaines : au-delà, l'écart d'une « semaine d'avant » ne veut plus rien dire
+    const x = new Date(d), l = new Date(x - ((x.getDay() + 6) % 7) * 864e5).toISOString().slice(0, 10);
+    (sem[l] ||= []).push(v);
+  }
+  const cles = Object.keys(sem).sort().slice(-6);
+  if (cles.length < 2) return "";
+  const moy = (k) => sem[k].reduce((a, b) => a + b, 0) / sem[k].length;
+  const lignes = cles.map((k, i) => {
+    const suite = i && (new Date(k) - new Date(cles[i - 1])) / 864e5 <= 7;   // écart avec la semaine juste avant seulement
+    const d = suite ? moy(k) - moy(cles[i - 1]) : null;
+    return `<div><span>semaine du ${jj(k)} <small class="sous">${sem[k].length} pesée${sem[k].length > 1 ? "s" : ""}</small></span>
+      <b>${virgule(moy(k))} kg${d != null ? ` <small class="${Math.abs(d) < 0.25 ? "sous" : ""}">${d > 0 ? "+" : d < 0 ? "−" : "±"}${virgule(Math.abs(d))}</small>` : ""}</b></div>`;
+  }).reverse().join("");
+  return `<div class="carte"><b>Poids par semaine</b> <span class="sous">moyenne, et écart avec la semaine d'avant</span>
+    <div class="lignes">${lignes}</div></div>`;
 }
 
 function tuile(titre, valeur, unite, sous, ton) {
@@ -791,6 +987,7 @@ function sante() {
   h += `<div class="periode">${[30, 90].map((p) => `<button data-periode="${p}" class="${p === periode ? "choisi" : ""}">${p} jours</button>`).join("")}</div>`;
   const pes = pesees();
   h += courbe("Poids", pes, { relier: 60, jours: 365, ajuster: true, fmt: (v) => virgule(v), legende: "kg" });
+  h += poidsSemaines(pes);
   h += courbe("Sommeil", pt("sommeil"), { ...o, refs: [C.sommeil], fmt: hm, couleur: "#5e5ce6", legende: "pointillés : ta cible" });
   h += courbe("VFC (nuit)", pt("vfc"), { ...o, bande: v?.vfc_bas ? [v.vfc_bas, v.vfc_haut] : null, couleur: "var(--vert)", legende: "ms, bande verte : ton habituel" });
   h += courbe("FC au repos", pt("fc"), { ...o, couleur: "var(--rouge)", legende: "bpm" });
@@ -816,6 +1013,7 @@ function sante() {
 let sansClic = 0;   // après un glissement sur une série, le clic qui suit ne la sélectionne pas
 document.addEventListener("click", (ev) => {
   if (Date.now() - sansClic < 450) return;
+  if (ev.target.closest("input, textarea, select")) return;   // un champ garde la main (et le clavier)
   const t = ev.target.closest("button, h3, [data-ligne], [data-memo]");
   if (!t) return;
   const carte = t.closest("[data-exo]");
@@ -862,15 +1060,52 @@ document.addEventListener("click", (ev) => {
     s.type = t.dataset.type; ouvert = null; choisie = null; saisie = {}; sauver();
   } else if (t.dataset.ouvrir != null) {
     ouvert = ouvert === nom ? null : nom; choisie = null;
-  } else if (t.dataset.pas || t.dataset.reps) {
-    // Régler la ligne sélectionnée : une série faite est corrigée en place, une prévue est notée
-    // dans les réglages (et les lignes prévues suivantes la suivent).
-    const { e, L, ks, st } = lignesDe(nom), l = L.find((x) => x.k === ks);
+  } else if (t.dataset.pm) {
+    // Les − / + d'une ligne : la charge au pas de l'exercice, les répétitions une par une.
+    const row = t.closest(".ls"), k = Number(row.dataset.ligne), ech = !!row.dataset.ech;
+    const { L, W, pas } = lignesDe(nom), l = (ech ? W : L).find((x) => x.k === k);
     if (!l) return;
-    const c = t.dataset.pas ? Math.max(0, Math.round((Number(l.c || 0) + Number(t.dataset.pas)) * 4) / 4) : l.c;
-    const r = t.dataset.reps ? Math.max(1, l.r + Number(t.dataset.reps)) : l.r;
-    if (l.fait) { Object.assign(e.series[ks], { c, r }); sauver(); }
-    else st.edits[ks] = { c, r };
+    const d = Number(t.dataset.d);
+    if (t.dataset.pm === "c") regler(nom, k, ech, "c", Math.max(0, (l.c || 0) + d * pas));
+    else regler(nom, k, ech, "r", l.r + d);
+    navigator.vibrate?.(8);
+  } else if (t.hasAttribute("data-res")) {
+    const k = Number(t.closest(".ls").dataset.ligne);
+    choisie = choisie?.[0] === nom && choisie[1] === k ? null : [nom, k];
+  } else if (t.hasAttribute("data-cocher-ech")) {
+    // Un échauffement fait : un repos court (1 min), sans réserve à noter.
+    const { W, st } = lignesDe(nom), l = W.find((x) => !x.fait);
+    if (!l) return;
+    let e = s.exos.find((x) => x.nom === nom);
+    if (!e) { e = { nom, series: [] }; s.exos.push(e); }
+    (e.ech ||= []).push({ c: l.c, r: l.r, t: new Date().toTimeString().slice(0, 8) });
+    st.ech = Math.max(0, st.ech - 1); delete st.echEdits[l.k];
+    if (s.excuse) s.excuse = null;
+    navigator.vibrate?.(30);
+    sauver();
+    const suiv = lignesDe(nom).W.find((x) => !x.fait) || lignesDe(nom).L.find((x) => !x.fait);
+    lancerRepos(nom, `${nom} · échauffement fait`, suiv ? `${kg(suiv.c)} kg × ${suiv.r}` : "", 60);
+  } else if (t.hasAttribute("data-ech-retirer")) {
+    const k = Number(t.closest(".ls").dataset.ligne), e = s.exos.find((x) => x.nom === nom);
+    if (!e?.ech?.[k]) return;
+    e.ech.splice(k, 1); lignesDe(nom).st.echEdits = {};
+    if (!e.ech.length) delete e.ech;
+    sauver();
+  } else if (t.hasAttribute("data-plus-ech")) {
+    lignesDe(nom).st.ech++;
+  } else if (t.hasAttribute("data-remplacer")) {
+    ouvrirAjout(nom); return;
+  } else if (t.hasAttribute("data-hp")) {
+    let e = s.exos.find((x) => x.nom === nom);
+    if (!e) { e = { nom, series: [] }; s.exos.push(e); }
+    if (e.hp) delete e.hp; else e.hp = true;
+    sauver();
+  } else if (t.hasAttribute("data-hp-seance")) {
+    if (s.hp) delete s.hp; else s.hp = true;
+    sauver();
+  } else if (t.dataset.excuse) {
+    s.excuse = s.excuse?.tag === t.dataset.excuse ? null : { tag: t.dataset.excuse, texte: s.excuse?.texte || "" };
+    sauver();
   } else if (t.hasAttribute("data-valider") || t.hasAttribute("data-cocher")) {
     const { L, k0, n, st, der, ci } = lignesDe(nom), l = L.find((x) => x.k === k0);
     if (!l) return;
@@ -879,6 +1114,7 @@ document.addEventListener("click", (ev) => {
     if (e.series.length >= n) st.extra = Math.max(0, st.extra - 1);   // une série ajoutée en plus est faite
     e.series.push({ c: l.c, r: l.r, t: new Date().toTimeString().slice(0, 8) });
     delete st.edits[k0];
+    if (s.excuse) s.excuse = null;   // finalement, séance : le jour n'est plus excusé
     choisie = null; ouvert = nom;
     navigator.vibrate?.(30);
     sauver();
@@ -889,9 +1125,10 @@ document.addEventListener("click", (ev) => {
     }
     minu.effort = { nom, i: e.series.length - 1 }; garder();   // l'effort se note pendant le repos
   } else if (t.dataset.ligne != null) {
-    const nm = t.dataset.nom, k = Number(t.dataset.ligne);
-    if (ouvert === nm && choisie?.[0] === nm && choisie[1] === k) choisie = null;
-    else { ouvert = nm; choisie = [nm, k]; }
+    // Une puce de carte fermée l'ouvre ; dans une carte ouverte, la ligne se règle par ses boutons.
+    const nm = t.dataset.nom;
+    if (ouvert === nm) return;
+    ouvert = nm; choisie = null;
   } else if (t.hasAttribute("data-retirer")) {
     const { ks } = lignesDe(nom);
     retirerSerie(nom, ks);
@@ -907,7 +1144,26 @@ document.addEventListener("click", (ev) => {
 
 document.addEventListener("change", (ev) => {
   if (ev.target.id === "choix-exo") { exoGraphe = ev.target.value; ecrire("carnet:exo-graphe", exoGraphe); dessiner(); }
+  if (ev.target.dataset.champ) {
+    const row = ev.target.closest(".ls"), nom = row.dataset.nom, champ = ev.target.dataset.champ;
+    const brut = ev.target.value.trim().replace(",", ".").toLowerCase();
+    const v = champ === "c" && (brut === "" || brut === "pdc") ? 0 : parseFloat(brut);
+    if (Number.isFinite(v)) regler(nom, Number(row.dataset.ligne), !!row.dataset.ech, champ, v);
+    dessiner();
+  }
 });
+
+// Régler une ligne : une série faite est corrigée en place, une prévue est notée dans les réglages
+// (les lignes prévues qui suivent prennent sa charge).
+function regler(nom, k, ech, champ, v) {
+  const { e, L, W, st } = lignesDe(nom), l = (ech ? W : L).find((x) => x.k === k);
+  if (!l) return;
+  const nv = { c: l.c, r: l.r };
+  if (champ === "c") nv.c = Math.max(0, Math.min(500, Math.round(v * 4) / 4));
+  else nv.r = Math.max(1, Math.min(100, Math.round(v)));
+  if (l.fait) { Object.assign((ech ? e.ech : e.series)[k], nv); sauver(); }
+  else (ech ? st.echEdits : st.edits)[k] = nv;
+}
 
 // ───────────────────────────────────────── photos de suivi
 
@@ -956,6 +1212,7 @@ async function envoyerPhotos() {
 document.addEventListener("input", (ev) => {
   if (ev.target.id === "note") { seanceDuJour().note = ev.target.value; sauver(); }
   if (ev.target.id === "note-jour") geste("journal", "Note", ev.target.value);
+  if (ev.target.id === "excuse-texte" && seanceDuJour().excuse) { seanceDuJour().excuse.texte = ev.target.value; sauver(); }
   if (ev.target.hasAttribute("data-note-exo")) {
     const nom = ev.target.closest("[data-exo]").dataset.exo, s = seanceDuJour();
     let e = s.exos.find((x) => x.nom === nom);
@@ -968,39 +1225,57 @@ document.addEventListener("input", (ev) => {
 
 // Fiche d'un exercice : la machine en photo (départ, arrivée), son nom anglais pour la reconnaître
 // ou demander à la salle, les muscles, trois consignes, l'erreur à éviter, et le mémo de réglage.
+// Les exercices de posture viennent de reels : `dosage` (séries, durée tenue) et `reels` (la vidéo
+// d'origine, la meilleure démonstration du geste) ; `img` manque quand free-exercise-db n'a pas l'exercice.
 function ouvrirFiche(nom) {
   const f = FICHES[nom], mm = memo(nom);
-  $("#fiche-contenu").innerHTML = `<div class="f-images">${[0, 1].map((i) => `<figure><img src="fiches/${f.img}-${i}.jpg" alt="" loading="lazy"><figcaption>${i ? "arrivée" : "départ"}</figcaption></figure>`).join("")}</div>
+  const images = f.img ? `<div class="f-images">${[0, 1].map((i) => `<figure><img src="fiches/${f.img}-${i}.jpg" alt="" loading="lazy"><figcaption>${i ? "arrivée" : "départ"}</figcaption></figure>`).join("")}</div>` : "";
+  const reels = (f.reels || []).map((u, i) => `<a class="f-reel" href="${esc(u)}" target="_blank" rel="noopener">▶ voir la démo${f.reels.length > 1 ? ` ${i + 1}` : ""} (Instagram)</a>`).join("");
+  $("#fiche-contenu").innerHTML = `${images}
     <h2>${esc(nom)}</h2><div class="f-en">${esc(f.en)}</div>
     <div class="sous">${esc(f.muscles)}</div>
+    ${f.dosage ? `<div class="f-dosage">${esc(f.dosage)}</div>` : ""}
     ${mm ? `<div class="memo">📌 ${esc(mm)}</div>` : ""}
     <ol>${f.consignes.map((c) => `<li>${esc(c)}</li>`).join("")}</ol>
-    <div class="remarque">✕ ${esc(f.erreur)}</div>`;
+    <div class="remarque">✕ ${esc(f.erreur)}</div>
+    ${reels ? `<div class="f-reels">${reels}</div>` : ""}`;
   $("#fiche").showModal();
 }
 $("#fiche").addEventListener("click", (ev) => { if (ev.target.id === "fiche" || ev.target.id === "fermer-fiche") $("#fiche").close(); });
 
 // Ajouter un exercice hors programme : la liste du PC, ou un nom libre (le PC le signalera).
-function ouvrirAjout() {
+// Pour remplacer un exercice (machine prise, d'après openGym) : ceux du même muscle d'abord.
+let remplace = null;
+function ouvrirAjout(origine = null) {
   const dlg = $("#ajout"), champ = $("#cherche");
+  remplace = origine;
+  const g = origine ? groupeDe(origine) : null;
+  $("#ajout-titre").textContent = origine ? `Remplacer ${origine}` : "Ajouter un exercice";
   const rendu = () => {
     const q = champ.value.trim().toLowerCase();
     // Nom, alias (« pec fly » → Écarté machine) ou groupe, sans tenir compte des accents.
     const plat = (s) => (s || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
     const qp = plat(q);
-    const liste = (ctx?.exercices || []).filter((x) => !q || plat(x.nom).includes(qp)
-      || plat(x.alias).includes(qp) || plat(x.groupe).includes(qp));
+    const liste = (ctx?.exercices || []).filter((x) => x.nom !== origine && (q ? plat(x.nom).includes(qp)
+      || plat(x.alias).includes(qp) || plat(x.groupe).includes(qp) : !g || x.groupe === g));
     $("#choix").innerHTML = liste.map((x) => `<button data-choix="${esc(x.nom)}">${esc(x.nom)} <span>${esc(x.groupe)}${x.alias ? ` · ${esc(x.alias)}` : ""}</span></button>`).join("")
       + (q && !liste.some((x) => x.nom.toLowerCase() === q) ? `<button data-choix="${esc(champ.value.trim())}">+ « ${esc(champ.value.trim())} »</button>` : "");
   };
   champ.value = ""; rendu(); champ.oninput = rendu;
-  dlg.showModal(); champ.focus();
+  dlg.showModal(); if (!origine) champ.focus();   // pour remplacer, la liste d'abord, sans clavier
 }
 $("#choix").addEventListener("click", (ev) => {
   const b = ev.target.closest("[data-choix]");
   if (!b) return;
   const s = seanceDuJour(), nom = b.dataset.choix;
   if (!s.exos.find((x) => x.nom === nom)) s.exos.push({ nom, series: [] });
+  if (remplace) {
+    // Le remplacé quitte la séance s'il n'a encore rien de fait ; le remplaçant prend sa place.
+    s.remplace = { ...(s.remplace || {}), [remplace]: nom };
+    const o = s.exos.find((x) => x.nom === remplace);
+    if (o && !o.series?.length && !o.ech?.length) s.exos = s.exos.filter((x) => x !== o);
+    remplace = null;
+  }
   ouvert = nom; $("#ajout").close(); sauver(); dessiner();
 });
 $("#fermer-ajout").addEventListener("click", () => $("#ajout").close());
@@ -1074,9 +1349,9 @@ let tic = null, sonne = false;
 // un appui tombant entre deux réécritures se perdait.
 function boutons(html) { const b = $("#min-boutons"); if (b.dataset.html !== html) { b.innerHTML = html; b.dataset.html = html; } }
 
-function lancerRepos(nom, quoi, cible) {
-  const duree = reposDe(nom);
-  minu = { nom, quoi, cible, duree, fin: Date.now() + duree * 1000, restant: null, mode: "repos" };
+function lancerRepos(nom, quoi, cible, impose = null) {
+  const duree = impose ?? reposDe(nom);
+  minu = { nom, quoi, cible, duree, fin: Date.now() + duree * 1000, restant: null, mode: "repos", impose: impose != null };
   sonne = false; garder(); ecranAllume();
   if (window.Notification?.permission === "default") Notification.requestPermission();   // une fois, au premier repos
 }
@@ -1172,7 +1447,7 @@ $("#minuteur").addEventListener("click", (ev) => {
     const d = Number(a);
     if (minu.restant != null) minu.restant += d; else minu.fin += d * 1000;
     minu.duree = Math.max(15, minu.duree + d);
-    if (minu.nom && minu.mode === "repos" && !minu.quoi.startsWith("Repos avant")) ecrire(`carnet:repos:${minu.nom}`, minu.duree);
+    if (minu.nom && minu.mode === "repos" && !minu.impose && !minu.quoi.startsWith("Repos avant")) ecrire(`carnet:repos:${minu.nom}`, minu.duree);
     if ((minu.restant ?? (minu.fin - Date.now()) / 1000) > 0) sonne = false;
   }
   garder();

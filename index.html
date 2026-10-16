@@ -175,10 +175,38 @@
   .tag.vert { color: var(--vert); } .tag.jaune { color: var(--jaune); } .tag.rouge { color: var(--rouge); }
   .exo .cible.decharge { color: var(--jaune); }
   /* Les lignes de séries (carte ouverte) */
-  .lignes-series { display: grid; gap: 6px; margin-top: 10px; }
-  .ls { display: grid; grid-template-columns: 22px 1fr auto 38px; align-items: center; gap: 8px; min-height: 50px;
-    padding: 4px 6px 4px 8px; border-radius: 11px; background: var(--carte2); border: 2px solid transparent;
+  .lignes-series { display: grid; gap: 6px; margin-top: 4px; }
+  /* Une ligne : numéro, − charge +, − reps +, réserve, rond. Chaque ligne a ses boutons (comme openGym). */
+  .ls, .ls-tete { display: grid; grid-template-columns: 14px minmax(0, 1.3fr) minmax(0, 1fr) 32px 36px; align-items: center; gap: 4px; }
+  .ls { min-height: 50px; padding: 4px 4px 4px 6px; border-radius: 11px; background: var(--carte2); border: 2px solid transparent;
     font-variant-numeric: tabular-nums; touch-action: pan-y; transition: background .15s; }
+  .ls-tete { margin-top: 10px; padding: 0 6px; font-size: 11px; color: var(--doux); text-align: center; }
+  .pm { display: grid; grid-template-columns: 28px minmax(0, 1fr) 28px; align-items: center; height: 40px;
+    border-radius: 9px; background: rgba(255,255,255,.07); }
+  .ls.prochaine .pm, .ls.prevue .pm { background: var(--carte2); }
+  .pm button { height: 40px; padding: 0; border: 0; background: none; color: var(--texte); font-size: 20px; }
+  .pm input { width: 100%; min-width: 0; height: 40px; padding: 0; border: 0; background: none; color: inherit; text-align: center;
+    font: 600 17px system-ui, -apple-system, Roboto, sans-serif; font-variant-numeric: tabular-nums; }
+  .pm input::placeholder { color: var(--doux); font-weight: 400; font-size: 14px; }
+  .ls.prevue .pm input { font-weight: 400; }
+  .ls.ech { border-style: dotted; }
+  .ls.ech .ls-n { font-style: italic; }
+  button.ls-e { height: 32px; padding: 0; border: 0; border-radius: 8px; background: none; color: var(--doux); font-size: 13px; }
+  button.ls-e.note { color: var(--texte); }
+  .serie.ech { color: var(--doux); font-style: italic; }
+  .liens { display: flex; gap: 6px; flex-wrap: wrap; }
+  .liens { justify-content: space-between; } .liens .lien { white-space: nowrap; font-size: 15px; }
+  .lien.petit { display: block; text-align: left; font-size: 13px; color: var(--doux); }
+  .motifs { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0 4px; }
+  .motifs button { border: 0; border-radius: 999px; background: var(--carte2); color: var(--texte); padding: 7px 12px; font-size: 14px; }
+  .motifs button.choisi { background: var(--bleu); font-weight: 600; }
+  #excuse-texte { width: 100%; margin-top: 8px; height: 40px; border-radius: 10px; border: 1px solid var(--ligne); background: var(--bg);
+    color: var(--texte); padding: 0 10px; font-size: 15px; }
+  .bilan .b-exo { padding: 9px 0; border-top: 1px solid var(--ligne); font-size: 15px; }
+  .bilan .b-exo:first-of-type { border-top: 0; }
+  .bilan .vert, .lignes .vert { color: var(--vert); } .bilan .jaune { color: var(--jaune); }
+  .streak { margin-top: 8px; font-size: 15px; } .streak b { font-size: 20px; }
+  .cal span.excuse, .legende i.excuse { background: repeating-linear-gradient(45deg, var(--carte2) 0 2px, var(--doux) 2px 3px); }
   .ls.prochaine { background: none; border-color: var(--ligne); }
   .ls.prevue { background: none; border: 2px dashed var(--carte2); color: var(--doux); }
   .ls.sel { border-color: var(--bleu); border-style: solid; }
@@ -220,6 +248,9 @@
   .f-images img { width: 100%; aspect-ratio: 4 / 3; object-fit: cover; border-radius: 10px; display: block; background: var(--carte2); }
   .f-images figcaption { font-size: 12px; color: var(--doux); text-align: center; margin-top: 2px; }
   #fiche h2 { font-size: 20px; margin: 12px 0 0; }
+  .f-dosage { margin-top: 8px; font-weight: 600; color: var(--bleu); }
+  .f-reels { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; }
+  .f-reel { display: block; padding: 10px 12px; border-radius: 10px; background: var(--carte2); color: inherit; text-decoration: none; }
   .f-en { color: var(--bleu); font-size: 15px; font-style: italic; }
   #fiche ol { margin: 10px 0 6px; padding-left: 20px; font-size: 15px; }
   #fiche ol li { margin-bottom: 4px; }
@@ -241,6 +272,7 @@
   <div class="boutons" id="min-boutons"></div>
 </div>
 <dialog id="ajout">
+  <div class="sous" id="ajout-titre">Ajouter un exercice</div>
   <input id="cherche" placeholder="Exercice…" autocomplete="off">
   <div class="choix" id="choix"></div>
   <button class="lien" id="fermer-ajout">Annuler</button>
