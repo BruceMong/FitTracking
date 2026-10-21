@@ -268,7 +268,17 @@ function prochaine() {
 // ───────────────────────────────────────── enregistrement
 
 let envoi = null;
+// Une séance notée « autre » ou « posture » dont tous les exercices faits sont d'une même séance de la
+// rotation (des jambes un soir de repos…) prend ce type : sinon la rotation repartait de travers.
+function typeReel(d) {
+  if (!["autre", "posture"].includes(d.type)) return d.type;
+  const faits = d.exos.filter((e) => e.series?.length).map((e) => (ctx?.exercices || []).find((x) => x.nom === e.nom)?.seance);
+  const types = new Set(faits);
+  return faits.length && types.size === 1 && ["push", "pull", "legs"].includes(faits[0]) ? faits[0] : d.type;
+}
+
 function sauver() {
+  doc.type = typeReel(doc);
   doc.maj = new Date().toISOString();
   ecrire(`carnet:seance:${jour}`, { doc, sale: true });
   clearTimeout(envoi);
@@ -456,7 +466,7 @@ function dessiner() {
       h += `<div class="saisie">`;
       const ls = L.find((l) => l.k === ks);
       if (ls) h += `<div class="sous sel-titre">Série ${ks + 1} : combien tu aurais pu en faire de plus ?</div>
-        <div class="reserve"><span></span>${[0, 1, 2, 3, 4].map((k) => `<button data-reserve="${k}" class="${ls.e === k ? "choisi" : ""}">${k === 4 ? "4+" : k}</button>`).join("")}</div>
+        <div class="reserve"><div class="choix">${boutonsReserve("data-reserve", ls.e)}</div></div>
         <div class="deux"><button class="gros danger" data-retirer>Retirer</button><button class="gros secondaire" data-deselect>OK</button></div>`;
       h += `<input class="note-exo" data-note-exo value="${esc(e?.note || "")}" placeholder="Note sur l'exercice (sensations, réglage, douleur…)">
         <div class="liens"><button class="lien" data-plus-serie>+ une série</button><button class="lien" data-plus-ech>+ échauffement</button>
@@ -1230,18 +1240,40 @@ document.addEventListener("input", (ev) => {
 function ouvrirFiche(nom) {
   const f = FICHES[nom], mm = memo(nom);
   const images = f.img ? `<div class="f-images">${[0, 1].map((i) => `<figure><img src="fiches/${f.img}-${i}.jpg" alt="" loading="lazy"><figcaption>${i ? "arrivée" : "départ"}</figcaption></figure>`).join("")}</div>` : "";
-  const reels = (f.reels || []).map((u, i) => `<a class="f-reel" href="${esc(u)}" target="_blank" rel="noopener">▶ voir la démo${f.reels.length > 1 ? ` ${i + 1}` : ""} (Instagram)</a>`).join("");
+  // Les démos des reels se lisent dans la fiche, par le lecteur intégré officiel d'Instagram (réseau
+  // nécessaire) ; un onglet par démo, la première chargée d'office, le lien direct en secours.
+  const ids = (f.reels || []).map((u) => [u, (u.match(/instagram\.com\/(?:p|reel)\/([\w-]+)/) || [])[1]]).filter((x) => x[1]);
+  const reels = ids.length ? `<div class="f-video">
+      ${ids.length > 1 ? `<div class="f-onglets">${ids.map((_, i) => `<button data-demo="${i}" class="${i ? "" : "choisi"}">Démo ${i + 1}</button>`).join("")}</div>` : ""}
+      <div class="f-cadre"><iframe src="https://www.instagram.com/p/${ids[0][1]}/embed/" loading="lazy" allow="autoplay; encrypted-media; picture-in-picture; fullscreen" allowfullscreen title="Démo de l'exercice"></iframe></div>
+      <a class="f-reel" href="${esc(ids[0][0])}" target="_blank" rel="noopener">Ouvrir dans Instagram</a></div>` : "";
   $("#fiche-contenu").innerHTML = `${images}
     <h2>${esc(nom)}</h2><div class="f-en">${esc(f.en)}</div>
     <div class="sous">${esc(f.muscles)}</div>
     ${f.dosage ? `<div class="f-dosage">${esc(f.dosage)}</div>` : ""}
     ${mm ? `<div class="memo">📌 ${esc(mm)}</div>` : ""}
+    ${reels}
     <ol>${f.consignes.map((c) => `<li>${esc(c)}</li>`).join("")}</ol>
-    <div class="remarque">✕ ${esc(f.erreur)}</div>
-    ${reels ? `<div class="f-reels">${reels}</div>` : ""}`;
+    <div class="remarque">✕ ${esc(f.erreur)}</div>`;
+  $("#fiche-contenu").dataset.demos = JSON.stringify(ids);
   $("#fiche").showModal();
 }
-$("#fiche").addEventListener("click", (ev) => { if (ev.target.id === "fiche" || ev.target.id === "fermer-fiche") $("#fiche").close(); });
+$("#fiche").addEventListener("click", (ev) => {
+  const d = ev.target.closest("[data-demo]");
+  if (d) {
+    const ids = JSON.parse($("#fiche-contenu").dataset.demos || "[]"), [u, id] = ids[Number(d.dataset.demo)] || [];
+    if (!id) return;
+    $("#fiche-contenu").querySelectorAll("[data-demo]").forEach((b) => b.classList.toggle("choisi", b === d));
+    $("#fiche-contenu iframe").src = `https://www.instagram.com/p/${id}/embed/`;
+    $("#fiche-contenu .f-reel").href = u;
+    return;
+  }
+  if (ev.target.id === "fiche" || ev.target.id === "fermer-fiche") {
+    // Fermer arrête la vidéo : l'iframe vidée ne continue pas à jouer en fond.
+    const fr = $("#fiche-contenu iframe"); if (fr) fr.src = "about:blank";
+    $("#fiche").close();
+  }
+});
 
 // Ajouter un exercice hors programme : la liste du PC, ou un nom libre (le PC le signalera).
 // Pour remplacer un exercice (machine prise, d'après openGym) : ceux du même muscle d'abord.
@@ -1400,13 +1432,18 @@ function majRepos() {
   }
 }
 
+// Les cinq boutons de la réserve (0 à 4+), le chiffre en gros et un repère sous les deux bouts.
+const boutonsReserve = (attr, choisi) => [0, 1, 2, 3, 4].map((k) =>
+  `<button ${attr}="${k}" class="${choisi === k ? "choisi" : ""}" aria-label="${k === 4 ? "4 ou plus" : k} en réserve"><b>${k === 4 ? "4+" : k}</b>${
+    k === 0 ? "<small>à fond</small>" : k === 4 ? "<small>facile</small>" : "<small>&nbsp;</small>"}</button>`).join("");
+
 function majEffort() {
   // « Combien tu aurais pu en faire de plus ? » (la réserve) sous le minuteur, pour la série qui vient d'être faite. Facultatif :
   // la réserve affine la cible et la récupération ; sans réponse, la série compte comme difficile.
   const el = $("#min-effort"), ef = minu?.effort;
   const x = ef ? seanceDuJour().exos.find((e) => e.nom === ef.nom)?.series?.[ef.i] : null;
-  const html = x ? `<span>Combien tu aurais pu en faire de plus ?</span>${[0, 1, 2, 3, 4].map((k) =>
-    `<button data-effort="${k}" class="${x.e === k ? "choisi" : ""}">${k === 4 ? "4+" : k}</button>`).join("")}` : "";
+  const html = x ? `<span class="q">Série faite : combien tu aurais pu en faire de plus ?</span>
+    <div class="choix">${boutonsReserve("data-effort", x.e)}</div>` : "";
   if (el.dataset.html !== html) { el.innerHTML = html; el.dataset.html = html; }
 }
 
