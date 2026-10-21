@@ -1,6 +1,6 @@
 // Hors ligne : l'appli elle-même vient du cache (la salle capte mal), les appels à la base
 // passent toujours par le réseau — les séances en attente sont gardées par app.js.
-const VERSION = "fittracking-v19";
+const VERSION = "fittracking-v20";
 const FICHIERS = ["./", "index.html", "app.js", "fiches.js", "corps.js", "manifest.webmanifest", "icon.svg", "icon-192.png", "icon-512.png"];
 // Les photos des fiches d'exercice (~1 Mo), en cache dès l'installation : la salle capte mal.
 const IMAGES = [
@@ -153,7 +153,9 @@ self.addEventListener("fetch", (e) => {
   const url = new URL(e.request.url);
   if (e.request.method !== "GET" || url.origin !== location.origin) return;
   e.respondWith(
-    fetch(e.request)
+    // no-cache : le navigateur revalide auprès du serveur au lieu de resservir sa copie HTTP (10 min sur
+    // GitHub Pages), sans quoi une nouvelle version mettait jusqu'à 10 minutes à arriver.
+    fetch(e.request, { cache: "no-cache" })
       .then((r) => { const copie = r.clone(); caches.open(VERSION).then((c) => c.put(e.request, copie)); return r; })
       .catch(() => caches.match(e.request, { ignoreSearch: true }).then((r) => r || caches.match("index.html")))
   );

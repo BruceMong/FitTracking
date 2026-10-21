@@ -1607,6 +1607,14 @@ async function ecranAllume() {
 window.addEventListener("online", synchroniser);
 document.addEventListener("visibilitychange", () => { if (!document.hidden) { charger(); if (minu) { garder(); ecranAllume(); } } });
 if (minu) garder();
-if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js");
+if ("serviceWorker" in navigator) {
+  navigator.serviceWorker.register("sw.js");
+  // Une nouvelle version prend la main : la page se recharge pour l'afficher tout de suite (tout est déjà
+  // enregistré sur le téléphone, minuteur compris). Pas au premier lancement, où il n'y avait rien avant.
+  const avait = !!navigator.serviceWorker.controller;
+  navigator.serviceWorker.addEventListener("controllerchange", () => { if (avait) location.reload(); });
+}
+// Le numéro de version, en bas de page : pour vérifier que le téléphone a bien la dernière.
+caches?.keys?.().then((ks) => { const v = ks.find((k) => k.startsWith("fittracking-")); if (v) $("#version").textContent = `FitTracking ${v.slice(12)}`; }).catch(() => {});
 dessiner();
 if (cle) charger();
