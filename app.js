@@ -923,6 +923,109 @@ function aujourdhuiSante() {
   return h;
 }
 
+// ───────────────────────────────────────── cap : une habitude à faire baisser
+
+// Le suivi d'une habitude personnelle, noté dans la journée du carnet (doc.cap) : combien de fois
+// aujourd'hui (n), dont combien « avec écran » (e, l'objectif est 0), et les envies passées ou non
+// (envies : [{t: "22:14", ok: true}]). Pas de série qui retombe à zéro : la tendance d'une semaine sur
+// l'autre, la cible de la semaine (la moyenne de la précédente moins un), les heures à risque.
+// Le bouton « envie » lance 10 minutes avec une chose à faire à la place.
+const CAP_MIN = 10;
+const CAP_IDEES = ["Sors de la pièce, laisse le téléphone", "20 pompes ou 30 squats", "Une douche", "Marche 10 minutes dehors",
+  "Un grand verre d'eau, puis une tâche de 5 minutes", "Appelle ou écris à quelqu'un", "Tapis : 5 minutes de posture"];
+let capEnvie = lire("carnet:cap-envie");   // {debut, idee} pendant les 10 minutes
+let capTic = null;
+
+function capDuJour() { const s = seanceDuJour(); s.cap = { n: 0, e: 0, envies: [], ...(s.cap || {}) }; return s.cap; }
+function capJours(nb) {
+  // Les nb derniers jours, aujourd'hui compris : {jour, n, e, envies} (null quand rien n'est noté).
+  const parJour = Object.fromEntries(toutesSeances().filter((x) => x.cap).map((x) => [x.jour, x.cap]));
+  const out = [];
+  for (let k = nb - 1; k >= 0; k--) {
+    const d = new Date(jour); d.setDate(d.getDate() - k);
+    const j = d.toISOString().slice(0, 10);
+    out.push({ jour: j, ...(parJour[j] || { n: null, e: null, envies: [] }) });
+  }
+  return out;
+}
+const capMoyenne = (js) => { const v = js.filter((x) => x.n != null); return v.length ? v.reduce((a, x) => a + x.n, 0) / v.length : null; };
+
+function carteCap() {
+  const c = doc?.cap || { n: 0, e: 0, envies: [] };
+  const j28 = capJours(28), sem = j28.slice(-7), avant = j28.slice(-14, -7);
+  const mS = capMoyenne(sem), mA = capMoyenne(avant);
+  const cibleSem = mA != null ? Math.max(1, Math.round(mA) - 1) : null;
+  const sansEcran = sem.filter((x) => x.n != null && !x.e).length, notes = sem.filter((x) => x.n != null).length;
+  const envies = j28.flatMap((x) => x.envies || []);
+  const tenues = envies.filter((x) => x.ok).length;
+  // Les envies par moment de la journée, sur 4 semaines : là où il faut se préparer.
+  const moments = [["matin", 6, 12], ["après-midi", 12, 18], ["soir", 18, 23], ["nuit", 23, 30]];
+  const parMoment = moments.map(([nom, a, b]) => [nom, envies.filter((x) => { let h = Number(x.t.slice(0, 2)); if (h < 6) h += 24; return h >= a && h < b; }).length]);
+  const pire = parMoment.reduce((m, x) => (x[1] > m[1] ? x : m), ["", 0]);
+  const max = Math.max(1, ...j28.slice(-14).map((x) => x.n || 0));
+
+  let h = `<div class="carte cap"><div class="c-tete"><b>Cap</b><span class="sous">ton objectif perso</span></div>`;
+  if (capEnvie) {
+    const reste = Math.max(0, capEnvie.debut + CAP_MIN * 60e3 - Date.now());
+    h += reste > 0
+      ? `<div class="cap-envie"><div class="t-val grand" id="cap-chrono">${Math.floor(reste / 60e3)}:${String(Math.floor(reste / 1e3) % 60).padStart(2, "0")}</div>
+          <div><b>${esc(capEnvie.idee)}</b><div class="sous">L'envie redescend souvent en moins de 10 minutes.</div></div></div>
+          <div class="deux"><button class="gros secondaire" data-cap="idee">Autre idée</button><button class="gros secondaire" data-cap="fin-non">J'ai craqué</button></div>`
+      : `<div class="cap-envie"><b>10 minutes passées. L'envie est passée ?</b></div>
+          <div class="deux"><button class="gros" data-cap="fin-oui">Oui</button><button class="gros secondaire" data-cap="fin-non">Non</button></div>`;
+  } else {
+    h += `<button class="gros cap-bouton" data-cap="envie">J'ai une envie : 10 minutes</button>`;
+  }
+  h += `<div class="cap-compte"><span>Aujourd'hui</span>
+      <span class="pm"><button data-cap="n-" aria-label="une fois de moins">−</button><b>${c.n}</b><button data-cap="n+" aria-label="une fois de plus">+</button></span>
+      <span>dont avec écran</span>
+      <span class="pm"><button data-cap="e-" aria-label="une de moins avec écran">−</button><b class="${c.e ? "rouge" : ""}">${c.e}</b><button data-cap="e+" aria-label="une de plus avec écran">+</button></span></div>`;
+  h += `<div class="cap-barres">${j28.slice(-14).map((x) => `<i title="${jj(x.jour)}" style="height:${x.n == null ? 0 : 8 + (x.n / max) * 52}px"
+      class="${x.n == null ? "vide" : x.e ? "ecran" : ""} ${x.jour === jour ? "auj" : ""}"></i>`).join("")}</div>
+    <div class="sous cap-leg">14 jours · en orange : avec écran</div>`;
+  const lignes = [];
+  if (mS != null) lignes.push(`Cette semaine : <b>${mS.toFixed(1).replace(".", ",")}</b> par jour${mA != null ? ` (avant : ${mA.toFixed(1).replace(".", ",")})` : ""}`);
+  if (cibleSem != null) lignes.push(`Cible de la semaine : <b>${cibleSem} par jour</b> au plus, et zéro avec écran`);
+  else lignes.push(`Note chaque fois, même les jours ratés : la cible de la semaine viendra de ta moyenne.`);
+  if (notes) lignes.push(`Jours sans écran : <b>${sansEcran}/${notes}</b> cette semaine`);
+  if (envies.length) lignes.push(`Envies passées : <b>${tenues}/${envies.length}</b> sur 4 semaines${pire[1] ? ` · surtout le <b>${pire[0]}</b>` : ""}`);
+  h += `<div class="cap-lignes">${lignes.map((l) => `<div>${l}</div>`).join("")}</div></div>`;
+  return h;
+}
+
+function capChrono() {
+  // Le décompte des 10 minutes, seconde par seconde ; à zéro, la carte demande si l'envie est passée.
+  clearInterval(capTic);
+  capTic = setInterval(() => {
+    if (!capEnvie) return clearInterval(capTic);
+    const r = Math.max(0, capEnvie.debut + CAP_MIN * 60e3 - Date.now()), el = $("#cap-chrono");
+    if (r === 0) { clearInterval(capTic); navigator.vibrate?.([200, 100, 200]); return dessiner(); }
+    if (el) el.textContent = `${Math.floor(r / 60e3)}:${String(Math.floor(r / 1e3) % 60).padStart(2, "0")}`;
+  }, 1000);
+}
+if (capEnvie) setTimeout(capChrono, 0);
+
+function capAction(a) {
+  if (a === "envie" || a === "idee") {
+    const autres = CAP_IDEES.filter((x) => x !== capEnvie?.idee);
+    capEnvie = { debut: a === "envie" ? Date.now() : capEnvie.debut, idee: autres[Math.floor(Math.random() * autres.length)] };
+    ecrire("carnet:cap-envie", capEnvie);
+    capChrono();
+    return;
+  }
+  const c = capDuJour();
+  if (a === "fin-oui" || a === "fin-non") {
+    c.envies.push({ t: new Date(capEnvie?.debut || Date.now()).toTimeString().slice(0, 5), ok: a === "fin-oui" });
+    if (a === "fin-non") c.n += 1;
+    capEnvie = null; localStorage.removeItem("carnet:cap-envie"); clearInterval(capTic);
+  } else if (a === "n+") c.n += 1;
+  else if (a === "n-") { c.n = Math.max(0, c.n - 1); c.e = Math.min(c.e, c.n); }
+  else if (a === "e+") { c.e += 1; c.n = Math.max(c.n, c.e); }
+  else if (a === "e-") c.e = Math.max(0, c.e - 1);
+  navigator.vibrate?.(10);
+  sauver();
+}
+
 function sante() {
   const S = ctx?.sante;
   if (!S) return `<div class="carte sous">Le PC n'a pas encore envoyé tes données de santé : il le fera à sa prochaine synchro.</div>`;
@@ -932,6 +1035,7 @@ function sante() {
 
   for (const a of S.alertes || []) h += `<div class="carte alerte-carte">${esc(a)}</div>`;
   h += aujourdhuiSante();
+  h += carteCap();
 
   // La dernière nuit connue : durée face à la cible, horaires, phases.
   const n = dernier("sommeil");
@@ -1044,6 +1148,8 @@ document.addEventListener("click", (ev) => {
   } else if (t.dataset.ressenti) {
     const k = t.dataset.ressenti, n = Number(t.dataset.n);
     geste("journal", k, journalDuJour()[k] === n ? null : n);   // retoucher la même note l'efface, comme au panneau
+  } else if (t.dataset.cap) {
+    capAction(t.dataset.cap);
   } else if (t.dataset.routine) {
     geste("journal", `Fait:${t.dataset.routine}`, !journalDuJour().Fait[t.dataset.routine]);
   } else if (t.dataset.objectif) {

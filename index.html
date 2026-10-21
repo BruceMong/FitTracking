@@ -239,6 +239,22 @@
   .choix button.choisi, .effort .choix button.choisi { background: var(--bleu); }
   .choix button.choisi small { color: rgba(255,255,255,.85); }
   .choix button:active { transform: scale(.96); }
+  /* Cap : bouton d'envie, compteurs du jour, barres sur 14 jours. */
+  .cap-bouton { width: 100%; margin: 10px 0 4px; }
+  .cap-envie { display: flex; gap: 14px; align-items: center; margin: 10px 0; }
+  .cap-envie .t-val { font-variant-numeric: tabular-nums; min-width: 3.2em; }
+  .cap-compte { display: grid; grid-template-columns: 1fr 132px; gap: 8px 10px; align-items: center; margin: 10px 0; font-size: 15px; }
+  .cap-compte .pm { display: grid; grid-template-columns: 44px 1fr 44px; align-items: center; background: var(--carte2); border-radius: 10px; }
+  .cap-compte .pm b { text-align: center; font-size: 18px; font-variant-numeric: tabular-nums; }
+  .cap-compte .pm b.rouge { color: var(--orange, #ff9f0a); }
+  .cap-barres { display: grid; grid-template-columns: repeat(14, 1fr); gap: 4px; align-items: end; height: 64px; margin-top: 6px; }
+  .cap-barres i { display: block; border-radius: 4px 4px 2px 2px; background: var(--bleu); opacity: .8; }
+  .cap-barres i.ecran { background: #ff9f0a; }
+  .cap-barres i.vide { height: 3px !important; background: var(--ligne); }
+  .cap-barres i.auj { opacity: 1; outline: 2px solid var(--texte); outline-offset: 1px; }
+  .cap-leg { margin-top: 4px; font-size: 12px; }
+  .cap-lignes { display: flex; flex-direction: column; gap: 4px; margin-top: 10px; font-size: 14px; color: var(--doux); }
+  .cap-lignes b { color: var(--texte); }
   #flash { position: fixed; inset: 0; background: var(--vert); opacity: 0; pointer-events: none; z-index: 50; }
   #flash.on { animation: flash .45s ease-in-out 3; }
   @keyframes flash { 50% { opacity: .5; } }

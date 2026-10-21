@@ -22,6 +22,9 @@ service worker) pour noter ses séries au téléphone, à la salle, même sans r
   (énergie, humeur, peau), note du jour, routine du jour, objectifs sportifs. Chaque geste part daté avec
   la séance du jour ; le PC l'écrit dans journal.md ou objectifs.md comme le panneau, une seule fois, et
   un geste plus ancien que le dernier appliqué pour la même case est ignoré.
+- **Cap** (onglet Santé) : le suivi d'une habitude à faire baisser. Compteurs du jour, bouton « envie » qui lance
+  10 minutes avec une chose à faire à la place, tendance sur 14 jours, cible de la semaine (moyenne de la précédente
+  moins un), moments à risque. Noté dans la journée du carnet (`cap`) ; le PC le recopie dans son suivi.
 - **Fiches d'exercice** : le « i » à côté du nom ouvre la machine en photo (départ, arrivée), son nom
   anglais, les muscles, trois consignes, l'erreur à éviter et le mémo de réglage. Textes dans `fiches.js`
   (clé = nom exact de `sante/sport/exercices.md`), photos de free-exercise-db (domaine public) dans
