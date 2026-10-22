@@ -1062,6 +1062,53 @@ function capAction(a) {
   sauver();
 }
 
+// ───────────────────────────────────────── repas photographiés
+
+// Une photo de repas part au PC comme les photos de suivi (genre « repas-<id> ») ; la journée garde
+// l'heure et la note (doc.repas). Le PC la fait estimer par Claude à sa synchro suivante et renvoie
+// les repas du jour, les 7 derniers jours et les cibles (ctx.repas). Estimation à ±20-30 %.
+let repasOuvert = null, repasNote = "";   // la note tapée survit à un réaffichage, effacée après la photo
+const nouvelId = () => Math.random().toString(36).slice(2, 8).replace(/[^a-z0-9]/g, "x").padEnd(6, "x");
+
+function carteRepas() {
+  const R = ctx?.repas || {}, C = R.cibles || {};
+  const locaux = (doc?.repas || []).filter((r) => !r.retire);
+  const vus = Object.fromEntries((R.jour || []).map((x) => [x.id, x]));
+  // Les repas du téléphone d'abord (même pas encore analysés), complétés par ce que le PC en sait.
+  const liste = [...locaux.map((r) => ({ ...r, ...(vus[r.id] || {}) })),
+    ...(R.jour || []).filter((x) => !locaux.some((r) => r.id === x.id) && !(doc?.repas || []).some((r) => r.id === x.id && r.retire))]
+    .sort((a, b) => (a.t || "").localeCompare(b.t || ""));
+  const kcal = liste.reduce((a, x) => a + (x.kcal || 0), 0), prot = liste.reduce((a, x) => a + (x.proteines || 0), 0);
+  const barre = (v, c, coul) => `<div class="j-barre"><i style="width:${c ? Math.min(100, Math.round(100 * v / c)) : 0}%;background:${coul}"></i></div>`;
+  let h = `<div class="carte repas"><div class="c-tete"><b>Repas</b><span class="sous">estimés sur photo, ±25 %</span></div>
+    <div class="r-totaux"><div><div class="j-haut"><span><b>${kcal}</b> kcal</span><span class="sous">${C.kcal ? `cible ${C.kcal}` : ""}</span></div>${barre(kcal, C.kcal, kcal > (C.kcal || 1e9) * 1.1 ? "var(--jaune)" : "var(--vert)")}</div>
+      <div><div class="j-haut"><span><b>${prot}</b> g de protéines</span><span class="sous">${C.proteines ? `cible ${C.proteines}` : ""}</span></div>${barre(prot, C.proteines, "var(--bleu)")}</div></div>`;
+  for (const x of liste) {
+    const attente = x.plats == null;
+    const titre = attente ? (x.echec ? "analyse impossible, photo gardée sur le PC" : "analyse au prochain passage du PC…")
+      : (x.plats.map((p) => p.nom).join(", ") || "rien de reconnu");
+    h += `<button class="r-repas ${attente ? "attente" : ""}" data-repas="${esc(x.id)}"><span class="r-t">${esc(x.t || "")}</span>
+      <span class="r-nom">${esc(titre)}${x.note ? `<span class="sous">« ${esc(x.note)} »</span>` : ""}</span>
+      <span class="r-k">${attente ? "" : `<b>${x.kcal}</b> kcal<br><span class="sous">${x.proteines} g P</span>`}</span></button>`;
+    if (repasOuvert === x.id) {
+      h += `<div class="r-detail">${(x.plats || []).map((p) => `<div class="r-plat"><span>${esc(p.nom)} <span class="sous">${esc(p.portion || "")}</span></span>
+          <span>${p.kcal} kcal · ${p.proteines} P · ${p.glucides} G · ${p.lipides} L</span></div>`).join("")}
+        ${x.remarque ? `<div class="sous">${esc(x.remarque)}${x.confiance ? ` Confiance : ${esc(x.confiance)}.` : ""}</div>` : ""}
+        <button class="lien petit" data-repas-retirer="${esc(x.id)}">Retirer ce repas</button></div>`;
+    }
+  }
+  h += `<input id="repas-note" value="${esc(repasNote)}" placeholder="Précision facultative : grande assiette, avec sauce, 2 œufs…" autocomplete="off">
+    <button class="gros r-photo" data-repas-photo>Photo du repas</button>`;
+  const sem = R.semaine || [], notes = sem.filter((x) => x[3]);
+  if (notes.length) {
+    const max = Math.max(C.kcal || 0, ...sem.map((x) => x[1])) || 1;
+    h += `<div class="r-semaine">${sem.map(([j, k, , n]) => `<div><i style="height:${n ? Math.max(3, Math.round(56 * k / max)) : 2}px" class="${n ? "" : "vide"}"></i><span>${"lmmjvsd"[(new Date(j).getDay() + 6) % 7]}</span></div>`).join("")}
+      ${C.kcal ? `<b style="bottom:${Math.round(56 * C.kcal / max) + 16}px"></b>` : ""}</div>
+      <div class="sous">7 jours : ${Math.round(notes.reduce((a, x) => a + x[1], 0) / notes.length)} kcal et ${Math.round(notes.reduce((a, x) => a + x[2], 0) / notes.length)} g de protéines en moyenne, sur les jours notés. Un jour avec un repas oublié tire la moyenne vers le bas.</div>`;
+  }
+  return h + `</div>`;
+}
+
 function sante() {
   const S = ctx?.sante;
   if (!S) return `<div class="carte sous">Le PC n'a pas encore envoyé tes données de santé : il le fera à sa prochaine synchro.</div>`;
@@ -1071,6 +1118,7 @@ function sante() {
 
   for (const a of S.alertes || []) h += `<div class="carte alerte-carte">${esc(a)}</div>`;
   h += aujourdhuiSante();
+  h += carteRepas();
   h += carteCap();
 
   // La dernière nuit connue : durée face à la cible, horaires, phases.
@@ -1184,6 +1232,16 @@ document.addEventListener("click", (ev) => {
   } else if (t.dataset.ressenti) {
     const k = t.dataset.ressenti, n = Number(t.dataset.n);
     geste("journal", k, journalDuJour()[k] === n ? null : n);   // retoucher la même note l'efface, comme au panneau
+  } else if (t.hasAttribute("data-repas-photo")) {
+    genrePhoto = `repas-${nouvelId()}`; $("#fichier-photo").click(); return;
+  } else if (t.dataset.repasRetirer) {
+    const s2 = seanceDuJour(), id = t.dataset.repasRetirer;
+    s2.repas ||= [];
+    const r = s2.repas.find((x) => x.id === id);
+    if (r) r.retire = true; else s2.repas.push({ id, retire: true });
+    repasOuvert = null; sauver();
+  } else if (t.dataset.repas) {
+    repasOuvert = repasOuvert === t.dataset.repas ? null : t.dataset.repas;
   } else if (t.dataset.cap) {
     capAction(t.dataset.cap);
   } else if (t.dataset.routine) {
@@ -1341,6 +1399,13 @@ $("#fichier-photo").addEventListener("change", async (ev) => {
     const donnees = cv.toDataURL("image/jpeg", 0.82);
     const file = lire("carnet:photos", []);
     file.push({ jour, genre: genrePhoto, donnees });
+    if (genrePhoto.startsWith("repas-")) {
+      // Le repas existe tout de suite au téléphone (« analyse au prochain passage du PC »), avec sa note.
+      const s2 = seanceDuJour();
+      (s2.repas ||= []).push({ id: genrePhoto.slice(6), t: new Date().toTimeString().slice(0, 5), note: repasNote.trim() });
+      repasNote = "";
+      sauver();
+    }
     ecrire("carnet:photos", file);
     if (lire("carnet:photos", []).length !== file.length) throw new Error("mémoire du navigateur pleine");
     etat("attente", "photo à envoyer");
@@ -1369,6 +1434,7 @@ async function envoyerPhotos() {
 
 document.addEventListener("input", (ev) => {
   if (ev.target.id === "note") { seanceDuJour().note = ev.target.value; sauver(); }
+  if (ev.target.id === "repas-note") repasNote = ev.target.value;
   if (ev.target.id === "note-jour") geste("journal", "Note", ev.target.value);
   if (ev.target.id === "excuse-texte" && seanceDuJour().excuse) { seanceDuJour().excuse.texte = ev.target.value; sauver(); }
   if (ev.target.hasAttribute("data-note-exo")) {

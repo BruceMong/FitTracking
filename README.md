@@ -22,6 +22,9 @@ service worker) pour noter ses séries au téléphone, à la salle, même sans r
   (énergie, humeur, peau), note du jour, routine du jour, objectifs sportifs. Chaque geste part daté avec
   la séance du jour ; le PC l'écrit dans journal.md ou objectifs.md comme le panneau, une seule fois, et
   un geste plus ancien que le dernier appliqué pour la même case est ignoré.
+- **Repas** (onglet Santé) : « Photo du repas », avec une précision facultative. La photo part au PC comme les photos
+  de suivi ; `carnet-sync` la fait estimer par Claude (calories, protéines, glucides, lipides, plat par plat) et renvoie
+  le total du jour face aux cibles d'objectifs.md, le détail de chaque repas et les 7 derniers jours. ±20-30 %.
 - **Cap** (onglet Santé) : le suivi d'une habitude à faire baisser. Compteurs du jour, bouton « envie » qui lance
   10 minutes avec une chose à faire à la place, tendance sur 14 jours, cible de la semaine (moyenne de la précédente
   moins un), moments à risque. Noté dans la journée du carnet (`cap`) ; le PC le recopie dans son suivi.

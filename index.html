@@ -284,6 +284,26 @@
   .f-astuces li, .f-eviter li { position: relative; padding-left: 22px; }
   .f-astuces li::before { content: "✓"; position: absolute; left: 2px; color: var(--vert); font-weight: 700; }
   .f-eviter li::before { content: "✕"; position: absolute; left: 2px; color: #ff6961; font-weight: 700; }
+  /* Repas : totaux du jour, liste, détail, semaine. */
+  .r-totaux { display: grid; gap: 10px; margin: 10px 0 6px; }
+  .r-repas { display: grid; grid-template-columns: 44px minmax(0, 1fr) auto; gap: 8px; align-items: center; width: 100%; text-align: left;
+    background: none; border: 0; border-top: 1px solid var(--ligne); padding: 10px 0; color: var(--texte); font-size: 15px; }
+  .r-repas.attente { color: var(--doux); }
+  .r-repas .r-t { color: var(--doux); font-variant-numeric: tabular-nums; font-size: 14px; }
+  .r-repas .r-nom .sous { display: block; }
+  .r-repas .r-k { text-align: right; font-variant-numeric: tabular-nums; }
+  .r-detail { padding: 0 0 10px 52px; display: flex; flex-direction: column; gap: 6px; font-size: 14px; }
+  .r-plat { display: flex; flex-direction: column; }
+  .r-plat > span:last-child { color: var(--doux); font-variant-numeric: tabular-nums; }
+  #repas-note { width: 100%; height: 44px; margin-top: 10px; border-radius: 10px; border: 1px solid var(--ligne); background: var(--bg);
+    color: var(--texte); padding: 0 10px; font-size: 15px; }
+  .r-photo { margin-top: 8px; }
+  .r-semaine { position: relative; display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px; align-items: end; height: 76px; margin: 14px 0 6px; }
+  .r-semaine div { display: flex; flex-direction: column; align-items: center; justify-content: flex-end; gap: 4px; height: 100%; }
+  .r-semaine i { width: 100%; border-radius: 4px; background: var(--vert); opacity: .8; }
+  .r-semaine i.vide { background: var(--ligne); }
+  .r-semaine span { font-size: 11px; color: var(--doux); }
+  .r-semaine b { position: absolute; left: 0; right: 0; border-top: 1px dashed var(--doux); }
   #flash { position: fixed; inset: 0; background: var(--vert); opacity: 0; pointer-events: none; z-index: 50; }
   #flash.on { animation: flash .45s ease-in-out 3; }
   @keyframes flash { 50% { opacity: .5; } }
