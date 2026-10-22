@@ -1,7 +1,7 @@
 // Hors ligne : l'appli elle-même vient du cache (la salle capte mal), les appels à la base
 // passent toujours par le réseau — les séances en attente sont gardées par app.js.
-const VERSION = "fittracking-v22";
-const FICHIERS = ["./", "index.html", "app.js", "fiches.js", "corps.js", "manifest.webmanifest", "icon.svg", "icon-192.png", "icon-512.png"];
+const VERSION = "fittracking-v23";
+const FICHIERS = ["./", "index.html", "app.js", "fiches.js", "pictos.js", "corps.js", "manifest.webmanifest", "icon.svg", "icon-192.png", "icon-512.png"];
 // Les photos des fiches d'exercice (~1 Mo), en cache dès l'installation : la salle capte mal.
 const IMAGES = [
   "fiches/Band_Pull_Apart-0.jpg",
@@ -102,6 +102,8 @@ const IMAGES = [
   "fiches/Face_Pull-1.jpg",
   "fiches/Hammer_Curls-0.jpg",
   "fiches/Hammer_Curls-1.jpg",
+  "fiches/Dumbbell_Bench_Press-0.jpg",
+  "fiches/Dumbbell_Bench_Press-1.jpg",
   "fiches/Incline_Dumbbell_Press-0.jpg",
   "fiches/Incline_Dumbbell_Press-1.jpg",
   "fiches/Leg_Extensions-0.jpg",

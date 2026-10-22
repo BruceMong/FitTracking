@@ -10,6 +10,7 @@
 // dès que le réseau revient. Une séance = un document par jour, réécrit en entier.
 
 import { FICHES } from "./fiches.js";
+import { pictosDe } from "./pictos.js";
 import { CORPS } from "./corps.js";
 
 const URL_API = "https://vesdcipjplvgdwfsvefq.supabase.co/rest/v1/rpc/";
@@ -1386,26 +1387,35 @@ document.addEventListener("input", (ev) => {
 // d'origine, la meilleure démonstration du geste) ; `img` manque quand free-exercise-db n'a pas l'exercice.
 function ouvrirFiche(nom) {
   const f = FICHES[nom], mm = memo(nom);
-  const images = f.img ? `<div class="f-images">${[0, 1].map((i) => `<figure><img src="fiches/${f.img}-${i}.jpg" alt="" loading="lazy"><figcaption>${i ? "arrivée" : "départ"}</figcaption></figure>`).join("")}</div>` : "";
+  // Les photos de free-exercise-db, ou à défaut les schémas dessinés (pictos.js) : un rappel d'un coup d'œil.
+  const images = f.img ? `<div class="f-images">${[0, 1].map((i) => `<figure><img src="fiches/${f.img}-${i}.jpg" alt="" loading="lazy"><figcaption>${i ? "arrivée" : "départ"}</figcaption></figure>`).join("")}</div>` : pictosDe(nom);
   // Les démos des reels se lisent dans la fiche, par le lecteur intégré officiel d'Instagram (réseau
   // nécessaire) ; un onglet par démo, la première chargée d'office, le lien direct en secours.
   const ids = (f.reels || []).map((u) => [u, (u.match(/instagram\.com\/(?:p|reel)\/([\w-]+)/) || [])[1]]).filter((x) => x[1]);
-  const reels = ids.length ? `<div class="f-video">
+  const reels = ids.length ? `<button class="gros secondaire f-voir" data-voir>▶ Voir la démo en vidéo</button><div class="f-video" hidden>
       ${ids.length > 1 ? `<div class="f-onglets">${ids.map((_, i) => `<button data-demo="${i}" class="${i ? "" : "choisi"}">Démo ${i + 1}</button>`).join("")}</div>` : ""}
-      <div class="f-cadre"><iframe src="https://www.instagram.com/p/${ids[0][1]}/embed/" loading="lazy" allow="autoplay; encrypted-media; picture-in-picture; fullscreen" allowfullscreen title="Démo de l'exercice"></iframe></div>
+      <div class="f-cadre"><iframe data-src="https://www.instagram.com/p/${ids[0][1]}/embed/" allow="autoplay; encrypted-media; picture-in-picture; fullscreen" allowfullscreen title="Démo de l'exercice"></iframe></div>
       <a class="f-reel" href="${esc(ids[0][0])}" target="_blank" rel="noopener">Ouvrir dans Instagram</a></div>` : "";
   $("#fiche-contenu").innerHTML = `${images}
     <h2>${esc(nom)}</h2><div class="f-en">${esc(f.en)}</div>
     <div class="sous">${esc(f.muscles)}</div>
     ${f.dosage ? `<div class="f-dosage">${esc(f.dosage)}</div>` : ""}
     ${mm ? `<div class="memo">📌 ${esc(mm)}</div>` : ""}
-    ${reels}
     <ol>${f.consignes.map((c) => `<li>${esc(c)}</li>`).join("")}</ol>
-    <div class="remarque">✕ ${esc(f.erreur)}</div>`;
+    ${f.astuces ? `<div class="f-titre">Astuces</div><ul class="f-astuces">${f.astuces.map((c) => `<li>${esc(c)}</li>`).join("")}</ul>` : ""}
+    <div class="f-titre">À éviter</div><ul class="f-eviter">${[f.erreur, ...(f.eviter || [])].map((c) => `<li>${esc(c)}</li>`).join("")}</ul>
+    ${reels}`;
   $("#fiche-contenu").dataset.demos = JSON.stringify(ids);
   $("#fiche").showModal();
+  $("#fiche").scrollTop = 0;   // une fiche s'ouvre toujours en haut, sur les images
 }
 $("#fiche").addEventListener("click", (ev) => {
+  if (ev.target.closest("[data-voir]")) {
+    // La vidéo ne se charge qu'à la demande : la fiche s'ouvre tout de suite, même sans réseau.
+    const fr = $("#fiche-contenu iframe"); fr.src = fr.dataset.src;
+    $("#fiche-contenu .f-video").hidden = false; ev.target.closest("[data-voir]").remove();
+    return;
+  }
   const d = ev.target.closest("[data-demo]");
   if (d) {
     const ids = JSON.parse($("#fiche-contenu").dataset.demos || "[]"), [u, id] = ids[Number(d.dataset.demo)] || [];
