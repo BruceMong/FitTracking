@@ -131,6 +131,20 @@ function cible(der, nom) {
 // pré-remplies. Une ligne prévue reprend la ligne d'avant (la dernière série faite, ou la cible),
 // sauf si on l'a réglée : régler la charge d'une ligne la fait suivre aux suivantes. Une ligne faite
 // se corrige directement (charge, répétitions, réserve) au lieu d'être retirée puis refaite.
+// Ce qu'on note pour un exercice : « charge » (kg × répétitions), ou, pour la posture et la mobilité,
+// « reps » (des répétitions, sans kilos) ou « duree » (une tenue en secondes : étirements). Déduit de
+// la séance et de la fiche ; le bouton « en secondes / en répétitions » de la carte le change pour de bon.
+function mesureDe(nom) {
+  const choix = lire(`carnet:mesure:${nom}`);
+  if (choix) return choix;
+  const x = ctx?.exercices?.find((y) => y.nom === nom);
+  if (x?.seance !== "posture" && x?.groupe !== "mobilité") return "charge";
+  const dosage = FICHES[nom]?.dosage || "";
+  return /^Étirement/i.test(nom) || /^\d+\s*s\b|×\s*\d+\s*s\b/.test(dosage) ? "duree" : "reps";
+}
+// Une série en texte, selon la mesure : « 22×8 », « 10 rép. », « 45 s ».
+const serieTxt = (nom, c, r) => ({ reps: `${r} rép.`, duree: `${r} s` })[mesureDe(nom)] || `${kg(c)}×${r}`;
+
 function lignesDe(nom) {
   const e = seanceDuJour().exos.find((x) => x.nom === nom);
   const faites = e?.series || [];
@@ -138,7 +152,10 @@ function lignesDe(nom) {
   const n = ctx?.schema?.series || 4;
   const st = (saisie[nom] ||= { edits: {}, extra: 0, ech: 0, echEdits: {} });
   st.echEdits ||= {}; st.ech ||= 0;
+  const mode = mesureDe(nom);
   let prec = faites.length ? { c: faites[faites.length - 1].c, r: faites[faites.length - 1].r }
+    : mode === "duree" ? { c: 0, r: der?.series?.[0]?.[1] || 30 }
+    : mode === "reps" ? { c: 0, r: der?.series?.[0]?.[1] || 10 }
     : { c: ci?.c ?? der?.series?.[0]?.[0] ?? 20, r: ci?.r ?? ctx?.schema?.reps ?? 8 };
   const L = faites.map((x, k) => ({ k, c: x.c, r: x.r, e: x.e, fait: true }));
   for (let j = 0; j < Math.max(0, n - faites.length) + st.extra; j++) {
@@ -158,7 +175,7 @@ function lignesDe(nom) {
     W.push({ k, ...auto, ...(st.echEdits[k] || {}), fait: false });
   }
   const ks = choisie?.[0] === nom && L.some((l) => l.k === choisie[1] && l.fait) ? choisie[1] : null;
-  return { e, L, W, k0, ks, der, ci, n, st, pas };
+  return { e, L, W, k0, ks, der, ci: mode === "charge" ? ci : null, n, st, pas, mode };
 }
 
 // Le pas des boutons − / + d'un exercice : le plus petit écart entre deux charges déjà notées (un
@@ -189,7 +206,7 @@ function retirerSerie(nom, i) {
   if (!e.series.length && !e.ech?.length && !e.note && !e.hp) s.exos = s.exos.filter((z) => z !== e);
   decaler(nom, i, -1);
   annulation = { nom, i, serie, ordre };
-  toast(`Série ${kg(serie.c)}×${serie.r} retirée`, true);
+  toast(`Série ${serieTxt(nom, serie.c, serie.r)} retirée`, true);
   choisie = null; sauver();
 }
 
@@ -421,7 +438,7 @@ function dessiner() {
   for (const nom of exosAffiches(s)) {
     const e = s.exos.find((x) => x.nom === nom);
     const faites = e?.series || [];
-    const { L, W, k0, ks, der, ci, n, pas } = lignesDe(nom);
+    const { L, W, k0, ks, der, ci, n, pas, mode } = lignesDe(nom);
     const hp = horsProg(s, e);
     h += `<div class="carte exo ${ouvert === nom ? "ouvert" : ""} ${faites.length >= n ? "fait" : ""}" data-exo="${esc(nom)}">
       <h3 data-ouvrir="${esc(nom)}"><span class="nom">${esc(nom)}${FICHES[nom] ? `<button class="info" data-fiche="${esc(nom)}" aria-label="Fiche de l'exercice">i</button>` : ""}</span><span class="n">${faites.length}/${n}</span></h3>`;
@@ -446,8 +463,8 @@ function dessiner() {
       // Carte fermée : le résumé en puces, échauffement, faites puis prévues (pointillé). Toucher une puce ouvre la carte.
       const echF = (e?.ech || []).map((x) => `<span class="serie ech" data-ligne="0" data-nom="${esc(nom)}">é ${kg(x.c)}×${x.r}</span>`).join("");
       if (L.length || echF) h += `<div class="series">${echF}${L.map((l) => l.fait
-        ? `<span class="serie" data-ligne="${l.k}" data-nom="${esc(nom)}">${kg(l.c)}×${l.r}${l.e != null ? `<small>@${l.e}</small>` : ""}</span>`
-        : `<span class="prevue" data-ligne="${l.k}" data-nom="${esc(nom)}">${kg(l.c)}×${l.r}</span>`).join("")}</div>`;
+        ? `<span class="serie" data-ligne="${l.k}" data-nom="${esc(nom)}">${serieTxt(nom, l.c, l.r)}${l.e != null ? `<small>@${l.e}</small>` : ""}</span>`
+        : `<span class="prevue" data-ligne="${l.k}" data-nom="${esc(nom)}">${serieTxt(nom, l.c, l.r)}</span>`).join("")}</div>`;
     } else {
       // Carte ouverte : une ligne par série, chacune avec ses − / + (charge au pas de l'exercice,
       // répétitions) et son champ ; le rond de la prochaine la valide. Comme dans openGym : pas de
@@ -461,14 +478,19 @@ function dessiner() {
           : suivante ? `<button class="ls-ok" ${ech ? "data-cocher-ech" : "data-cocher"} aria-label="Valider ${ech ? "l'échauffement" : `la série ${l.k + 1}`}"></button>`
           : `<span class="ls-ok vide"></span>`;
         const res = ech ? (l.fait ? `<button class="ls-e" data-ech-retirer aria-label="Retirer l'échauffement">×</button>` : `<span></span>`)
+          : mode !== "charge" ? `<span></span>`
           : l.fait ? `<button class="ls-e ${l.e != null ? "note" : ""}" data-res aria-label="Réserve">${l.e != null ? `@${l.e === 4 ? "4+" : l.e}` : "@?"}</button>` : `<span></span>`;
         return `<div class="ls ${cls} ${ech ? "ech" : ""} ${!ech && l.k === ks ? "sel" : ""}" data-ligne="${l.k}" data-nom="${esc(nom)}" ${ech ? 'data-ech="1"' : ""}>
           <span class="ls-n">${ech ? "é" : l.k + 1}</span>
-          <span class="pm"><button data-pm="c" data-d="-1" aria-label="moins ${kg(pas)} kg">−</button><input data-champ="c" inputmode="decimal" enterkeyhint="done" value="${l.c ? kg(l.c) : ""}" placeholder="pdc" aria-label="charge en kg"><button data-pm="c" data-d="1" aria-label="plus ${kg(pas)} kg">+</button></span>
-          <span class="pm"><button data-pm="r" data-d="-1" aria-label="une répétition de moins">−</button><input data-champ="r" inputmode="numeric" enterkeyhint="done" value="${l.r}" aria-label="répétitions"><button data-pm="r" data-d="1" aria-label="une répétition de plus">+</button></span>
+          ${mode === "charge" ? `<span class="pm"><button data-pm="c" data-d="-1" aria-label="moins ${kg(pas)} kg">−</button><input data-champ="c" inputmode="decimal" enterkeyhint="done" value="${l.c ? kg(l.c) : ""}" placeholder="pdc" aria-label="charge en kg"><button data-pm="c" data-d="1" aria-label="plus ${kg(pas)} kg">+</button></span>
+          <span class="pm"><button data-pm="r" data-d="-1" aria-label="une répétition de moins">−</button><input data-champ="r" inputmode="numeric" enterkeyhint="done" value="${l.r}" aria-label="répétitions"><button data-pm="r" data-d="1" aria-label="une répétition de plus">+</button></span>`
+          : `<span class="pm large"><button data-pm="r" data-d="-1" aria-label="${mode === "duree" ? "5 secondes de moins" : "une répétition de moins"}">−</button><span class="pm-val"><input data-champ="r" inputmode="numeric" enterkeyhint="done" value="${l.r}" aria-label="${mode === "duree" ? "secondes" : "répétitions"}"><small>${mode === "duree" ? "s" : "rép."}</small></span><button data-pm="r" data-d="1" aria-label="${mode === "duree" ? "5 secondes de plus" : "une répétition de plus"}">+</button></span>`}
           ${res}${fin}</div>`;
       };
-      h += `<div class="ls-tete"><span></span><span>kg · pas ${kg(pas)}</span><span>reps</span><span>rés.</span><span></span></div>
+      h += mode === "charge" ? `<div class="ls-tete"><span></span><span>kg · pas ${kg(pas)}</span><span>reps</span><span>rés.</span><span></span></div>`
+        : `<div class="ls-tete sans-kg"><span></span><span>${mode === "duree" ? "tenue en secondes" : "répétitions, sans charge"}</span>
+            <button class="lien petit" data-mesure="${mode === "duree" ? "reps" : "duree"}">${mode === "duree" ? "en répétitions" : "en secondes"}</button></div>`;
+      h += `
         <div class="lignes-series">${W.map((l) => ligne(l, true)).join("")}${L.map((l) => ligne(l, false)).join("")}</div>`;
       h += `<div class="saisie">`;
       const ls = L.find((l) => l.k === ks);
@@ -476,7 +498,7 @@ function dessiner() {
         <div class="reserve"><div class="choix">${boutonsReserve("data-reserve", ls.e)}</div></div>
         <div class="deux"><button class="gros danger" data-retirer>Retirer</button><button class="gros secondaire" data-deselect>OK</button></div>`;
       h += `<input class="note-exo" data-note-exo value="${esc(e?.note || "")}" placeholder="Note sur l'exercice (sensations, réglage, douleur…)">
-        <div class="liens"><button class="lien" data-plus-serie>+ une série</button><button class="lien" data-plus-ech>+ échauffement</button>
+        <div class="liens"><button class="lien" data-plus-serie>+ une série</button>${mode === "charge" ? `<button class="lien" data-plus-ech>+ échauffement</button>` : ""}
           <button class="lien" data-remplacer>⇄ remplacer</button></div>
         ${s.hp ? "" : `<button class="lien petit" data-hp>${e?.hp ? "✓ hors progression aujourd'hui · annuler" : "Douleur, pas en forme : ne pas compter pour la progression"}</button>`}</div>`;
     }
@@ -1189,6 +1211,8 @@ document.addEventListener("click", (ev) => {
     s.type = t.dataset.type; ouvert = null; choisie = null; saisie = {}; sauver();
   } else if (t.dataset.ouvrir != null) {
     ouvert = ouvert === nom ? null : nom; choisie = null;
+  } else if (t.dataset.mesure) {
+    ecrire(`carnet:mesure:${nom}`, t.dataset.mesure); delete saisie[nom];
   } else if (t.dataset.pm) {
     // Les − / + d'une ligne : la charge au pas de l'exercice, les répétitions une par une.
     const row = t.closest(".ls"), k = Number(row.dataset.ligne), ech = !!row.dataset.ech;
@@ -1196,7 +1220,7 @@ document.addEventListener("click", (ev) => {
     if (!l) return;
     const d = Number(t.dataset.d);
     if (t.dataset.pm === "c") regler(nom, k, ech, "c", Math.max(0, (l.c || 0) + d * pas));
-    else regler(nom, k, ech, "r", l.r + d);
+    else regler(nom, k, ech, "r", l.r + d * (mesureDe(nom) === "duree" ? 5 : 1));
     navigator.vibrate?.(8);
   } else if (t.hasAttribute("data-res")) {
     const k = Number(t.closest(".ls").dataset.ligne);
@@ -1241,7 +1265,9 @@ document.addEventListener("click", (ev) => {
     let e = s.exos.find((x) => x.nom === nom);
     if (!e) { e = { nom, series: [] }; s.exos.push(e); }
     if (e.series.length >= n) st.extra = Math.max(0, st.extra - 1);   // une série ajoutée en plus est faite
-    e.series.push({ c: l.c, r: l.r, t: new Date().toTimeString().slice(0, 8) });
+    const mode = mesureDe(nom);
+    // Sans charge : c = 0 ; une tenue porte u = "s" (le PC l'écrit « 45 s » dans seances.md).
+    e.series.push({ c: mode === "charge" ? l.c : 0, r: l.r, ...(mode === "duree" ? { u: "s" } : {}), t: new Date().toTimeString().slice(0, 8) });
     delete st.edits[k0];
     if (s.excuse) s.excuse = null;   // finalement, séance : le jour n'est plus excusé
     choisie = null; ouvert = nom;
@@ -1250,9 +1276,11 @@ document.addEventListener("click", (ev) => {
     if (e.series.length >= n && !L.some((x) => x.k > k0)) finExercice(nom);
     else {
       const suiv = L.find((x) => x.k === k0 + 1);
-      lancerRepos(nom, `${nom} · série ${e.series.length + 1}/${Math.max(n, L.length)} ensuite`, suiv ? `${kg(suiv.c)} kg × ${suiv.r}` : "");
+      lancerRepos(nom, `${nom} · série ${e.series.length + 1}/${Math.max(n, L.length)} ensuite`, suiv ? (mode === "charge" ? `${kg(suiv.c)} kg × ${suiv.r}` : serieTxt(nom, suiv.c, suiv.r)) : "");
     }
-    minu.effort = { nom, i: e.series.length - 1 }; garder();   // l'effort se note pendant le repos
+    // La réserve se note pendant le repos, pour les séries avec charge seulement : une tenue ou un
+    // exercice de posture n'ont pas d'« échec » à approcher.
+    if (mode === "charge") { minu.effort = { nom, i: e.series.length - 1 }; garder(); }
   } else if (t.dataset.ligne != null) {
     // Une puce de carte fermée l'ouvre ; dans une carte ouverte, la ligne se règle par ses boutons.
     const nm = t.dataset.nom;
@@ -1289,7 +1317,7 @@ function regler(nom, k, ech, champ, v) {
   if (!l) return;
   const nv = { c: l.c, r: l.r };
   if (champ === "c") nv.c = Math.max(0, Math.min(500, Math.round(v * 4) / 4));
-  else nv.r = Math.max(1, Math.min(100, Math.round(v)));
+  else nv.r = Math.max(1, Math.min(mesureDe(nom) === "duree" ? 900 : 100, Math.round(v)));
   if (l.fait) { Object.assign((ech ? e.ech : e.series)[k], nv); sauver(); }
   else (ech ? st.echEdits : st.edits)[k] = nv;
 }
@@ -1460,9 +1488,9 @@ document.addEventListener("touchend", (ev) => {
   if (!e?.series?.[i]) return;
   if (dx < 0) retirerSerie(nom, i);
   else {
-    e.series.splice(i + 1, 0, { c: e.series[i].c, r: e.series[i].r, t: new Date().toTimeString().slice(0, 8) });
+    e.series.splice(i + 1, 0, { ...e.series[i], t: new Date().toTimeString().slice(0, 8) });
     decaler(nom, i, 1);
-    toast(`Série ${kg(e.series[i].c)}×${e.series[i].r} recopiée`, false);
+    toast(`Série ${serieTxt(nom, e.series[i].c, e.series[i].r)} recopiée`, false);
   }
   navigator.vibrate?.(25);
   choisie = null; sauver(); dessiner();
@@ -1493,7 +1521,7 @@ $("#toast").addEventListener("click", (ev) => {
 // Après la dernière série d'un exercice, pas de compte à rebours : le changement de machine fait le
 // repos ; un bouton en propose un si besoin.
 const POLY = /développé|tirage|rowing|presse|traction|squat|soulevé|dips|fente|hip thrust/i;
-const reposDe = (nom) => lire(`carnet:repos:${nom}`) ?? (POLY.test(nom) ? 150 : 90);
+const reposDe = (nom) => lire(`carnet:repos:${nom}`) ?? (mesureDe(nom) !== "charge" ? 30 : POLY.test(nom) ? 150 : 90);
 let minu = lire("carnet:minuteur");   // {nom, quoi, cible, duree, fin, restant (si en pause), mode}
 let tic = null, sonne = false;
 // Les boutons ne sont réécrits que s'ils changent : réécrits à chaque tic (4 fois par seconde),

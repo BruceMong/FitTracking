@@ -180,6 +180,14 @@
   .ls, .ls-tete { display: grid; grid-template-columns: 14px minmax(0, 1.3fr) minmax(0, 1fr) 32px 36px; align-items: center; gap: 4px; }
   .ls { min-height: 50px; padding: 4px 4px 4px 6px; border-radius: 11px; background: var(--carte2); border: 2px solid transparent;
     font-variant-numeric: tabular-nums; touch-action: pan-y; transition: background .15s; }
+  /* Posture et mobilité : pas de kilos, un seul champ large (répétitions ou secondes). */
+  .ls-tete.sans-kg { grid-template-columns: 14px minmax(0, 1fr) auto; }
+  .ls-tete.sans-kg { text-align: left; }
+  .ls-tete.sans-kg .lien { font-size: 13px; padding: 6px 10px; border-radius: 999px; background: var(--carte2); color: var(--bleu); white-space: nowrap; }
+  .pm.large { grid-column: span 2; grid-template-columns: 44px minmax(0, 1fr) 44px; }
+  .pm-val { display: flex; align-items: baseline; justify-content: center; gap: 4px; }
+  .pm .pm-val input { width: 2.4em; text-align: right; }
+  .pm-val small { color: var(--doux); font-size: 13px; }
   .ls-tete { margin-top: 10px; padding: 0 6px; font-size: 11px; color: var(--doux); text-align: center; }
   .pm { display: grid; grid-template-columns: 28px minmax(0, 1fr) 28px; align-items: center; height: 40px;
     border-radius: 9px; background: rgba(255,255,255,.07); }
