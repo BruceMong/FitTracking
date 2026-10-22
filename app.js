@@ -201,6 +201,14 @@ function retirerSerie(nom, i) {
 // récentes que sa dernière synchro remplacent les siennes, pour que la séance du jour compte déjà.
 const poidsReserve = (e) => (e == null || e <= 2 ? 1 : Math.max(0.3, 1 - 0.7 * (e - 2) / 4));
 const groupeDe = (nom) => ctx?.exercices?.find((x) => x.nom === nom)?.groupe;
+// Les muscles d'un exercice et ce qu'y vaut une série : 1 pour le groupe principal, ½ pour chaque
+// secondaire (colonne « Secondaires » d'exercices.md), comme sur le PC.
+function musclesDe(nom) {
+  const x = ctx?.exercices?.find((y) => y.nom === nom);
+  if (!x?.groupe) return [];
+  return [[x.groupe, 1], ...(x.secondaires || []).filter((g) => g !== x.groupe).map((g) => [g, 0.5])];
+}
+const nSeries = (n) => String(Math.round(n * 10) / 10).replace(".", ",");
 const seancesRecentes = () => toutesSeances().filter((s) => s.jour >= (ctx?.genere?.slice(0, 10) || "")
   && s.exos?.some((e) => e.series?.length));
 
@@ -211,9 +219,9 @@ function doses() {
     const debut = s.exos.flatMap((e) => (e.series || []).map((x) => x.t)).filter(Boolean).sort()[0];
     const k = `${s.jour}T${(debut || "18:00").slice(0, 5)}`;
     for (const e of s.exos) {
-      const g = groupeDe(e.nom);
-      if (!g || !ctx?.demi_vie?.[g] || !e.series?.length) continue;
-      (out[k] ||= {})[g] = (out[k][g] || 0) + e.series.reduce((a, x) => a + poidsReserve(x.e), 0) / 8;
+      if (!e.series?.length) continue;
+      const v = e.series.reduce((a, x) => a + poidsReserve(x.e), 0) / 8;
+      for (const [g, w] of musclesDe(e.nom)) if (ctx?.demi_vie?.[g]) (out[k] ||= {})[g] = (out[k][g] || 0) + v * w;
     }
   }
   return out;
@@ -237,9 +245,8 @@ function seriesGroupes() {
   for (const s of seancesRecentes()) {
     const j = (out[s.jour] = {});
     for (const e of s.exos) {
-      const g = groupeDe(e.nom);
       // Cardio et mobilité ne chargent pas un muscle : hors silhouette, comme sur le PC.
-      if (g && g !== "cardio" && g !== "mobilité" && e.series?.length) j[g] = (j[g] || 0) + e.series.length;
+      if (e.series?.length) for (const [g, w] of musclesDe(e.nom)) if (g !== "cardio" && g !== "mobilité") j[g] = (j[g] || 0) + e.series.length * w;
     }
   }
   return out;
@@ -754,13 +761,14 @@ function progres() {
 // La silhouette : séries de la semaine par muscle, ou récupération (même calcul que le panneau).
 // Chaque groupe d'exercices.md correspond à une ou plusieurs zones du dessin, de face ou de dos.
 const ZONES = {
-  pecs: [["face", "chest"]], dos: [["dos", "upperBack"], ["dos", "lowerBack"], ["dos", "rotatorCuff"]],
+  pecs: [["face", "chest"]], dorsaux: [["dos", "upperBack"]], "haut du dos": [["dos", "trapezius"], ["dos", "rotatorCuff"], ["face", "trapezius"]],
+  lombaires: [["dos", "lowerBack"]],
   "épaules": [["face", "deltoids"]], "épaules arrière": [["dos", "deltoids"]], triceps: [["face", "triceps"], ["dos", "triceps"]],
   biceps: [["face", "biceps"]], "avant-bras": [["face", "forearm"], ["dos", "forearm"]],
   quadriceps: [["face", "quadriceps"], ["face", "hipFlexors"]], ischios: [["dos", "hamstring"]], fessiers: [["dos", "gluteal"]],
   adducteurs: [["face", "adductors"], ["dos", "adductors"]], mollets: [["face", "calves"], ["dos", "calves"]],
   abdos: [["face", "abs"], ["face", "obliques"], ["face", "serratus"]],
-  cou: [["face", "neck"], ["face", "trapezius"], ["dos", "neck"], ["dos", "trapezius"]],
+  cou: [["face", "neck"], ["dos", "neck"]],
 };
 const ZONE_GROUPE = Object.fromEntries(Object.entries(ZONES).flatMap(([g, zs]) => zs.map(([v, m]) => [`${v}:${m}`, g])));
 let modeCorps = lire("carnet:corps", "volume");
@@ -801,7 +809,7 @@ function carteCorps(lundi) {
     // 10 séries par muscle et par semaine : le bas de la fourchette conseillée pour progresser.
     for (const [g, n] of Object.entries(v)) couleurs[g] = n >= 10 ? "var(--vert)" : n >= 6 ? "rgba(48,209,88,.6)" : "rgba(48,209,88,.3)";
     const tri = Object.entries(v).sort((a, b) => b[1] - a[1]);
-    detail = tri.length ? tri.map(([g, n]) => `${esc(g)} ${n}`).join(" · ") : "aucune série cette semaine";
+    detail = tri.length ? tri.map(([g, n]) => `${esc(g)} ${nSeries(n)}`).join(" · ") + " · ½ par muscle secondaire" : "aucune série cette semaine";
     legende = `<span><i style="background:rgba(48,209,88,.3)"></i>1-5</span><span><i style="background:rgba(48,209,88,.6)"></i>6-9</span>
       <span><i style="background:var(--vert)"></i>10 et plus</span><span><i style="background:var(--repos)"></i>0</span>`;
   }
@@ -817,14 +825,19 @@ function carteEquilibre() {
   // Tirer / pousser sur 4 semaines : pour la posture et l'épaule droite, au moins autant de tirage.
   const tp = ctx?.tirer_pousser;
   if (!tp) return "";
-  const debut = new Date(new Date(jour) - 27 * 864e5).toISOString().slice(0, 10), v = volume(debut);
-  const t = tp.tirer.reduce((a, g) => a + (v[g] || 0), 0), p = tp.pousser.reduce((a, g) => a + (v[g] || 0), 0);
+  // Le groupe principal seulement (pas les demi-séries des secondaires), comme sur le PC.
+  const debut = new Date(new Date(jour) - 27 * 864e5).toISOString().slice(0, 10);
+  let t = 0, p = 0;
+  for (const s of toutesSeances()) if (s.jour >= debut) for (const e of s.exos || []) {
+    const g = groupeDe(e.nom), n = e.series?.length || 0;
+    if (tp.tirer.includes(g)) t += n; else if (tp.pousser.includes(g)) p += n;
+  }
   if (!t && !p) return "";
   const r = p ? t / p : null, ton = r == null || r >= 1 ? "vert" : r >= 0.8 ? "jaune" : "rouge";
   return `<div class="carte"><div class="c-tete"><b>Tirer / pousser</b><span class="sous">séries sur 4 semaines</span></div>
     <div class="eq"><i style="flex:${t || 0.01};background:var(--violet)"></i><i style="flex:${p || 0.01};background:var(--bleu)"></i></div>
     <div class="j-haut" style="margin-top:6px"><span>tirer <b>${t}</b></span><span class="${ton}">${r == null ? "" : `rapport ${virgule(r)}`}</span><span>pousser <b>${p}</b></span></div>
-    <div class="sous" style="margin-top:6px">${ton === "vert" ? "Équilibré. " : "Trop de poussée. "}Pour la posture (épaules enroulées) et l'épaule droite, vise au moins autant de séries de tirage (dos, épaules arrière, biceps) que de poussée (pecs, épaules, triceps).</div></div>`;
+    <div class="sous" style="margin-top:6px">${ton === "vert" ? "Équilibré. " : "Trop de poussée. "}Pour la posture (épaules enroulées) et l'épaule droite, vise au moins autant de séries de tirage (dorsaux, haut du dos, épaules arrière, biceps) que de poussée (pecs, épaules, triceps).</div></div>`;
 }
 
 // ───────────────────────────────────────── l'onglet Santé
