@@ -98,13 +98,19 @@ function memo(nom) {
   return ctx?.exercices?.find((x) => x.nom === nom)?.reglage || "";
 }
 
+// Le schéma de séries×répétitions visé pour un exercice : le sien (colonne Schéma d'exercices.md,
+// poussé par carnet-sync : composés 4×6, isolation 3×12), sinon le défaut global du programme (4×8).
+function schemaDe(nom) {
+  return ctx?.exercices?.find((x) => x.nom === nom)?.schema || ctx?.schema || { series: 4, reps: 8 };
+}
+
 function cible(der, nom) {
   // Double progression, même règle que le panneau Santé (herdr-sante, cible) : charge gardée tant
   // que le schéma n'est pas tenu à la charge la plus haute, puis charge suivante ; deux crans si
   // tout a été tenu avec 3 répétitions en réserve. Trois séances sans progrès : décharge à −10 %,
   // signalée par le PC (il voit tout l'historique), tant qu'aucune séance plus récente ne l'a suivie.
   const series = der.series;
-  const { series: n = 4, reps = 8 } = ctx?.schema || {};
+  const { series: n = 4, reps = 8 } = schemaDe(nom);
   const charges = series.map((s) => s[0]).filter((c) => c != null);
   if (!charges.length) return null;
   const haut = Math.max(...charges);
@@ -150,14 +156,18 @@ function lignesDe(nom) {
   const e = seanceDuJour().exos.find((x) => x.nom === nom);
   const faites = e?.series || [];
   const der = derniereFois(nom), ci = der ? cible(der, nom) : null;
-  const n = ctx?.schema?.series || 4;
   const st = (saisie[nom] ||= { edits: {}, extra: 0, ech: 0, echEdits: {} });
   st.echEdits ||= {}; st.ech ||= 0;
   const mode = mesureDe(nom);
-  let prec = faites.length ? { c: faites[faites.length - 1].c, r: faites[faites.length - 1].r }
-    : mode === "duree" ? { c: 0, r: der?.series?.[0]?.[1] || 30 }
+  const sc = schemaDe(nom);
+  const n = sc.series;
+  // Une ligne prévue reprend la charge travaillée, mais vise toujours les répétitions de la cible
+  // (sc.reps / ci.r), jamais celles d'une série ratée : rater 6 au lieu de 8 ne doit pas faire
+  // proposer 6 aux séries suivantes, et la prochaine séance repart de la cible, sans re-réglage.
+  let prec = mode === "duree" ? { c: 0, r: der?.series?.[0]?.[1] || 30 }
     : mode === "reps" ? { c: 0, r: der?.series?.[0]?.[1] || 10 }
-    : { c: ci?.c ?? der?.series?.[0]?.[0] ?? 20, r: ci?.r ?? ctx?.schema?.reps ?? 8 };
+    : { c: faites.length ? faites[faites.length - 1].c : (ci?.c ?? der?.series?.[0]?.[0] ?? 20),
+        r: ci?.r ?? sc.reps };
   const L = faites.map((x, k) => ({ k, c: x.c, r: x.r, e: x.e, fait: true }));
   for (let j = 0; j < Math.max(0, n - faites.length) + st.extra; j++) {
     const k = faites.length + j;
@@ -411,12 +421,11 @@ function dessiner() {
   }
   if (s.excuse) h += `<div class="carte conseil"><b>Jour excusé : ${esc(s.excuse.tag)}</b>Ne compte pas comme un jour manqué.</div>`;
   h += `<div class="types">${TYPES.map((t) => `<button data-type="${t}" class="${t === s.type ? "choisi" : ""}">${t}${t === p ? " ·" : ""}</button>`).join("")}</div>`;
-  const nSeries = ctx?.schema?.series || 4;
   const faitesTot = s.exos.reduce((a, e) => a + (e.series?.length || 0), 0);
   let duree = "";
   if (faitesTot) {
     // Avancement de la séance : séries faites sur séries prévues, et durée depuis la première.
-    const prevues = Math.max(faitesTot, exosAffiches(s).length * nSeries);
+    const prevues = Math.max(faitesTot, exosAffiches(s).reduce((t, nom) => t + schemaDe(nom).series, 0));
     const ts = s.exos.flatMap((e) => [...(e.series || []), ...(e.ech || [])].map((x) => x.t)).filter(Boolean).sort();
     if (ts.length) {
       const enMin = (t) => { const [a, b] = t.split(":").map(Number); return a * 60 + b; };
