@@ -1801,6 +1801,7 @@ const playlist = () => lire("carnet:playlist", []);
 const setPlaylist = (l) => ecrire("carnet:playlist", l);
 let reglMus = lire("carnet:musique", { alea: false, i: -1 });
 const sauverMus = () => ecrire("carnet:musique", reglMus);
+let musSupprConfirm = null, musSupprT = null;   // confirmation en deux temps avant de supprimer une piste
 const audioEl = () => document.getElementById("audio");
 const sansExt = (nom) => nom.replace(/\.[^.]+$/, "");
 let urlPiste = null;
@@ -1847,6 +1848,17 @@ async function ajouterMusiques(files) {
   majMini();
   if (onglet === "musique") dessiner();
 }
+function demanderSuppr(nom) {   // 1er appui sur ✕ : demande confirmation (bouton « Supprimer ? »), auto-annulé après 4 s
+  musSupprConfirm = nom;
+  clearTimeout(musSupprT);
+  musSupprT = setTimeout(() => { musSupprConfirm = null; if (onglet === "musique") dessiner(); }, 4000);
+  if (onglet === "musique") dessiner();
+}
+function annulerSuppr() {
+  if (!musSupprConfirm) return;
+  musSupprConfirm = null; clearTimeout(musSupprT);
+  if (onglet === "musique") dessiner();
+}
 async function supprimerMusique(nom) {
   try { await pisteSupprimer(nom); } catch {}
   const l = playlist().filter((x) => x !== nom);
@@ -1886,21 +1898,27 @@ function musique() {
     `<div class="mus-piste ${i === reglMus.i ? "courant" : ""}" data-mus="jouer" data-nom="${esc(nom)}">`
     + `<span class="mus-i">${i === reglMus.i && a.src && !a.paused ? "▶" : i + 1}</span>`
     + `<span class="mus-nom">${esc(sansExt(nom))}</span>`
-    + `<button class="mus-suppr" data-mus="suppr" data-nom="${esc(nom)}" aria-label="Supprimer">✕</button></div>`).join("")
+    + `<button class="mus-suppr ${musSupprConfirm === nom ? "confirm" : ""}" data-mus="suppr" data-nom="${esc(nom)}" aria-label="Supprimer">${musSupprConfirm === nom ? "Supprimer ?" : "✕"}</button></div>`).join("")
     + `</div><p class="mus-pied">${l.length} musique${l.length > 1 ? "s" : ""} · stockées dans le téléphone</p>`;
   return h;
 }
 function musiqueClic(ev) {
   if (ev.target.id === "mus-ajouter") return document.getElementById("fichier-musique").click();
   const b = ev.target.closest("[data-mus]");
-  if (!b) return;
+  if (!b) return annulerSuppr();   // un clic ailleurs annule une suppression en attente
   const a = b.dataset.mus;
+  if (a === "suppr") {   // 1er appui : demande confirmation ; 2e appui sur la même piste : supprime
+    ev.stopPropagation();
+    if (musSupprConfirm === b.dataset.nom) { musSupprConfirm = null; clearTimeout(musSupprT); supprimerMusique(b.dataset.nom); }
+    else demanderSuppr(b.dataset.nom);
+    return;
+  }
+  annulerSuppr();
   if (a === "play") basculerMus();
   else if (a === "suiv") pisteVoisine(1);
   else if (a === "prec") pisteVoisine(-1);
   else if (a === "alea") { reglMus.alea = !reglMus.alea; sauverMus(); if (onglet === "musique") dessiner(); }
   else if (a === "jouer") jouerPiste(b.dataset.nom);
-  else if (a === "suppr") { ev.stopPropagation(); supprimerMusique(b.dataset.nom); }
 }
 audioEl().addEventListener("ended", () => pisteVoisine(1));
 audioEl().addEventListener("play", majMini);
