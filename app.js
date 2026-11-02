@@ -413,6 +413,7 @@ function dessiner() {
   document.querySelectorAll("[data-onglet]").forEach((b) => b.classList.toggle("choisi", b.dataset.onglet === onglet));
   if (onglet === "progres") { app.innerHTML = progres(); return; }
   if (onglet === "sante") { app.innerHTML = sante(); return; }
+  if (onglet === "musique") { app.innerHTML = musique(); return; }
   const s = seanceDuJour();
   const p = prochaine();
   const c = ctx?.conseil;
@@ -1769,6 +1770,147 @@ let verrou = null;
 async function ecranAllume() {
   try { if (!verrou && "wakeLock" in navigator) { verrou = await navigator.wakeLock.request("screen"); verrou.addEventListener("release", () => (verrou = null)); } } catch {}
 }
+
+// ═══════════════════════════════════════════ Musique (lecteur privé, mp3 dans IndexedDB)
+// Les musiques de séance restent dans le navigateur du téléphone (jamais sur GitHub) : ajoutées une fois
+// par sélection de fichiers, stockées en IndexedDB (blobs), jouées hors-ligne. La playlist (l'ordre) et
+// les réglages (aléatoire, piste en cours) sont dans localStorage. MediaSession = commandes sur l'écran
+// verrouillé et boutons casque. Rien n'est envoyé à un serveur.
+let mdb = null;
+function musiqueDB() {
+  if (mdb) return Promise.resolve(mdb);
+  return new Promise((ok, ko) => {
+    const r = indexedDB.open("carnet-musique", 1);
+    r.onupgradeneeded = () => r.result.createObjectStore("pistes", { keyPath: "nom" });
+    r.onsuccess = () => ok((mdb = r.result));
+    r.onerror = () => ko(r.error);
+  });
+}
+function mdbReq(mode, action) {
+  return musiqueDB().then((db) => new Promise((ok, ko) => {
+    const req = action(db.transaction("pistes", mode).objectStore("pistes"));
+    req.onsuccess = () => ok(req.result);
+    req.onerror = () => ko(req.error);
+  }));
+}
+const pisteAjouter = (nom, blob) => mdbReq("readwrite", (st) => st.put({ nom, blob }));
+const pisteBlob = (nom) => mdbReq("readonly", (st) => st.get(nom)).then((x) => x?.blob || null);
+const pisteSupprimer = (nom) => mdbReq("readwrite", (st) => st.delete(nom));
+
+const playlist = () => lire("carnet:playlist", []);
+const setPlaylist = (l) => ecrire("carnet:playlist", l);
+let reglMus = lire("carnet:musique", { alea: false, i: -1 });
+const sauverMus = () => ecrire("carnet:musique", reglMus);
+const audioEl = () => document.getElementById("audio");
+const sansExt = (nom) => nom.replace(/\.[^.]+$/, "");
+let urlPiste = null;
+
+async function jouerPiste(nom) {
+  const l = playlist(), idx = l.indexOf(nom);
+  if (idx < 0) return;
+  const blob = await pisteBlob(nom);
+  if (!blob) return toast(`« ${sansExt(nom)} » introuvable`);
+  const a = audioEl();
+  if (urlPiste) URL.revokeObjectURL(urlPiste);
+  urlPiste = URL.createObjectURL(blob);
+  a.src = urlPiste;
+  reglMus.i = idx; sauverMus();
+  try { await a.play(); } catch {}
+  majMedia(nom); majMini();
+  if (onglet === "musique") dessiner();
+}
+function basculerMus() {
+  const a = audioEl(), l = playlist();
+  if (!a.src) { if (l.length) jouerPiste(l[reglMus.i] || l[0]); return; }
+  if (a.paused) a.play().catch(() => {}); else a.pause();
+  majMini();
+}
+function pisteVoisine(d) {
+  const l = playlist();
+  if (!l.length) return;
+  let i;
+  if (reglMus.alea && l.length > 1) { do { i = Math.floor(Math.random() * l.length); } while (i === reglMus.i); }
+  else i = ((reglMus.i + d) % l.length + l.length) % l.length;
+  jouerPiste(l[i]);
+}
+async function ajouterMusiques(files) {
+  const l = playlist();
+  let n = 0;
+  for (const f of files) {
+    if (!/\.mp3$/i.test(f.name) && !/audio|mpeg/i.test(f.type)) continue;
+    try { await pisteAjouter(f.name, f); } catch { continue; }
+    if (!l.includes(f.name)) l.push(f.name);
+    n++;
+  }
+  setPlaylist(l);
+  toast(`${n} musique${n > 1 ? "s" : ""} ajoutée${n > 1 ? "s" : ""}`);
+  majMini();
+  if (onglet === "musique") dessiner();
+}
+async function supprimerMusique(nom) {
+  try { await pisteSupprimer(nom); } catch {}
+  const l = playlist().filter((x) => x !== nom);
+  setPlaylist(l);
+  if (reglMus.i >= l.length) { reglMus.i = l.length - 1; sauverMus(); }
+  majMini();
+  if (onglet === "musique") dessiner();
+}
+function majMedia(nom) {
+  if (!("mediaSession" in navigator)) return;
+  try { navigator.mediaSession.metadata = new MediaMetadata({ title: sansExt(nom), artist: "FitTracking" }); } catch {}
+  const set = (ev, fn) => { try { navigator.mediaSession.setActionHandler(ev, fn); } catch {} };
+  set("play", basculerMus); set("pause", basculerMus);
+  set("previoustrack", () => pisteVoisine(-1)); set("nexttrack", () => pisteVoisine(1));
+}
+function majMini() {
+  const el = document.getElementById("miniplayer");
+  if (!el) return;
+  const l = playlist(), a = audioEl();
+  if (!l.length) { el.className = "miniplayer"; el.innerHTML = ""; return; }
+  const nom = l[reglMus.i] || null, joue = a.src && !a.paused;
+  el.className = "miniplayer actif";
+  el.innerHTML = `<button data-mus="prec" aria-label="Précédent">⏮</button>`
+    + `<button data-mus="play" class="play" aria-label="${joue ? "Pause" : "Lecture"}">${joue ? "⏸" : "▶"}</button>`
+    + `<button data-mus="suiv" aria-label="Suivant">⏭</button>`
+    + `<div class="titre">${nom ? esc(sansExt(nom)) : "Choisis une musique"}</div>`
+    + `<button data-onglet="musique" class="liste" aria-label="Playlist">☰</button>`;
+}
+function musique() {
+  const l = playlist(), a = audioEl();
+  let h = `<div class="mus-haut">`
+    + `<button class="mus-ajouter" id="mus-ajouter">+ Ajouter des musiques</button>`
+    + `<button class="mus-alea ${reglMus.alea ? "on" : ""}" data-mus="alea">🔀 Aléatoire</button></div>`;
+  if (!l.length)
+    return h + `<p class="mus-vide">Aucune musique pour l'instant. « Ajouter des musiques » puis choisis tes mp3 depuis le téléphone : ils restent dans l'appli, se lisent hors-ligne et ne sont envoyés nulle part.</p>`;
+  h += `<div class="mus-liste">` + l.map((nom, i) =>
+    `<div class="mus-piste ${i === reglMus.i ? "courant" : ""}" data-mus="jouer" data-nom="${esc(nom)}">`
+    + `<span class="mus-i">${i === reglMus.i && a.src && !a.paused ? "▶" : i + 1}</span>`
+    + `<span class="mus-nom">${esc(sansExt(nom))}</span>`
+    + `<button class="mus-suppr" data-mus="suppr" data-nom="${esc(nom)}" aria-label="Supprimer">✕</button></div>`).join("")
+    + `</div><p class="mus-pied">${l.length} musique${l.length > 1 ? "s" : ""} · stockées dans le téléphone</p>`;
+  return h;
+}
+function musiqueClic(ev) {
+  if (ev.target.id === "mus-ajouter") return document.getElementById("fichier-musique").click();
+  const b = ev.target.closest("[data-mus]");
+  if (!b) return;
+  const a = b.dataset.mus;
+  if (a === "play") basculerMus();
+  else if (a === "suiv") pisteVoisine(1);
+  else if (a === "prec") pisteVoisine(-1);
+  else if (a === "alea") { reglMus.alea = !reglMus.alea; sauverMus(); if (onglet === "musique") dessiner(); }
+  else if (a === "jouer") jouerPiste(b.dataset.nom);
+  else if (a === "suppr") { ev.stopPropagation(); supprimerMusique(b.dataset.nom); }
+}
+audioEl().addEventListener("ended", () => pisteVoisine(1));
+audioEl().addEventListener("play", majMini);
+audioEl().addEventListener("pause", majMini);
+document.getElementById("fichier-musique").addEventListener("change", (ev) => {
+  if (ev.target.files?.length) ajouterMusiques(ev.target.files);
+  ev.target.value = "";
+});
+document.addEventListener("click", musiqueClic);
+majMini();
 
 // ───────────────────────────────────────── démarrage
 

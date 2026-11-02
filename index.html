@@ -334,6 +334,27 @@
   .f-en { color: var(--bleu); font-size: 15px; font-style: italic; }
   #fiche ol { margin: 10px 0 6px; padding-left: 20px; font-size: 15px; }
   #fiche ol li { margin-bottom: 4px; }
+  /* Lecteur de musique (mp3 privés, dans le navigateur) */
+  .miniplayer { display: none; position: sticky; top: 0; z-index: 6; align-items: center; gap: 8px;
+    background: var(--carte); border-radius: 12px; padding: 6px 10px; margin: 0 0 8px; }
+  .miniplayer.actif { display: flex; }
+  .miniplayer button { border: 0; background: none; color: var(--texte); font-size: 20px; padding: 4px; line-height: 1; }
+  .miniplayer .play { font-size: 24px; }
+  .miniplayer .titre { flex: 1; min-width: 0; font-size: 14px; color: var(--doux); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .miniplayer .liste { font-size: 18px; color: var(--doux); }
+  .mus-haut { display: flex; gap: 8px; margin-bottom: 10px; }
+  .mus-haut button { flex: 1; border: 0; border-radius: 10px; height: 44px; font-size: 15px; background: var(--carte2); color: var(--texte); }
+  .mus-ajouter { background: var(--bleu); color: #fff; font-weight: 600; }
+  .mus-alea.on { background: var(--bleu); color: #fff; }
+  .mus-vide { color: var(--doux); font-size: 15px; line-height: 1.45; }
+  .mus-liste { display: flex; flex-direction: column; }
+  .mus-piste { display: flex; align-items: center; gap: 10px; padding: 11px 4px; border-bottom: 1px solid var(--ligne); font-size: 15px; }
+  .mus-piste:last-child { border-bottom: 0; }
+  .mus-piste.courant, .mus-piste.courant .mus-i { color: var(--bleu); font-weight: 600; }
+  .mus-piste .mus-i { width: 22px; text-align: center; color: var(--doux); font-variant-numeric: tabular-nums; }
+  .mus-nom { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .mus-suppr { border: 0; background: none; color: var(--doux); font-size: 16px; padding: 4px 6px; }
+  .mus-pied { color: var(--doux); font-size: 13px; text-align: center; padding-top: 10px; }
 </style>
 </head>
 <body>
@@ -341,10 +362,13 @@
   <h1 id="titre">FitTracking</h1>
   <span id="etat" class="etat"></span>
 </header>
-<div class="onglets"><button data-onglet="seance" class="choisi">Séance</button><button data-onglet="sante">Santé</button><button data-onglet="progres">Progrès</button></div>
+<div class="onglets"><button data-onglet="seance" class="choisi">Séance</button><button data-onglet="sante">Santé</button><button data-onglet="progres">Progrès</button><button data-onglet="musique">Musique</button></div>
+<div class="miniplayer" id="miniplayer"></div>
 <main id="app"></main>
 <div id="version" class="version"></div>
 <input type="file" id="fichier-photo" accept="image/*" capture="environment" hidden>
+<input type="file" id="fichier-musique" accept="audio/*,.mp3" multiple hidden>
+<audio id="audio" preload="none"></audio>
 <div class="minuteur" id="minuteur">
   <div class="quoi" id="min-quoi"></div>
   <div class="haut"><div class="chrono" id="chrono">1:30</div><div class="sous" id="min-cible"></div></div>
