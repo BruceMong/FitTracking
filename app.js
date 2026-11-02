@@ -103,6 +103,11 @@ function memo(nom) {
 function schemaDe(nom) {
   return ctx?.exercices?.find((x) => x.nom === nom)?.schema || ctx?.schema || { series: 4, reps: 8 };
 }
+// Superset : le partenaire d'un exercice (programme.md « *(superset avec X)* », poussé par le PC).
+// On enchaîne une série de chacun, puis un seul repos (120 s). Clé stable d'une paire = les deux noms triés.
+const partenaireSuperset = (nom) => ctx?.supersets?.[nom];
+const clefSuperset = (a, b) => [a, b].sort().join(" + ");
+const ssOff = new Set();   // paires débranchées pour la séance (« Repos seul » : machine occupée)
 
 function cible(der, nom) {
   // Double progression, même règle que le panneau Santé (herdr-sante, cible) : charge gardée tant
@@ -457,6 +462,8 @@ function dessiner() {
     const g = groupeDe(nom), rec = ctx?.records?.[nom];
     const tg = [];
     if (g) tg.push(`<span class="tag ${rc[g] != null ? etatRecup(rc[g]) : ""}">${esc(g)}${rc[g] >= 0.25 ? ` · ${Math.round(rc[g] * 100)} %` : ""}</span>`);
+    const partN = partenaireSuperset(nom);
+    if (partN) tg.push(`<span class="tag">⚡ superset · ${esc(partN)}</span>`);
     if (rec?.charge) tg.push(`<span class="tag">record ${kg(rec.charge)} kg</span>`);
     else if (rec?.reps) tg.push(`<span class="tag">record ${rec.reps} reps</span>`);
     if (hp) tg.push(`<span class="tag jaune">hors progression</span>`);
@@ -1341,8 +1348,20 @@ document.addEventListener("click", (ev) => {
     choisie = null; ouvert = nom;
     navigator.vibrate?.(30);
     sauver();
-    if (e.series.length >= n && !L.some((x) => x.k > k0)) finExercice(nom);
-    else {
+    // Superset : si le partenaire est encore en retard, on enchaîne sans repos ; sinon repos de 120 s
+    // après la paire. « Repos seul » (ssOff) débranche la paire pour la séance (machine occupée).
+    const part = partenaireSuperset(nom), ssOn = part && !ssOff.has(clefSuperset(nom, part));
+    const pExo = part ? s.exos.find((x) => x.nom === part) : null;
+    if (ssOn) { e.ss = clefSuperset(nom, part); if (pExo) pExo.ss = e.ss; }
+    const selfFini = e.series.length >= n && !L.some((x) => x.k > k0);
+    const partFini = pExo ? pExo.series.length >= schemaDe(part).series : false;
+    if (ssOn && !partFini && (pExo?.series.length || 0) < e.series.length) {
+      enchainerSuperset(part, nom);
+    } else if (selfFini && (!ssOn || partFini)) {
+      finExercice(nom);
+    } else if (ssOn) {
+      lancerRepos(nom, "Superset · repos", `${nom} ↔ ${part}`, 120);
+    } else {
       const suiv = L.find((x) => x.k === k0 + 1);
       lancerRepos(nom, `${nom} · série ${e.series.length + 1}/${Math.max(n, L.length)} ensuite`, suiv ? (mode === "charge" ? `${kg(suiv.c)} kg × ${suiv.r}` : serieTxt(nom, suiv.c, suiv.r)) : "");
     }
@@ -1601,12 +1620,17 @@ $("#toast").addEventListener("click", (ev) => {
 
 // ───────────────────────────────────────── repos entre les séries
 
-// Durée par défaut : 2 min 30 sur les polyarticulaires (développés, tirages, presse…), 1 min 30 sur
-// l'isolation. Un ajustement ±15 s pendant le repos devient la durée de cet exercice la fois suivante.
+// Durée fixée par la session (sante/sport/programme.md), NON modifiable au carnet : dérivée du schéma
+// d'exercices.md — composé (4×6) 2 min 30, isolation (3×12) 1 min 30, posture/mobilité 30 s. Le ±15 s
+// pendant le repos ne sert qu'à rattraper le chrono en cours (timer lancé en retard) et n'est jamais
+// mémorisé : la fois suivante reprend toujours la valeur fixée.
 // Après la dernière série d'un exercice, pas de compte à rebours : le changement de machine fait le
 // repos ; un bouton en propose un si besoin.
-const POLY = /développé|tirage|rowing|presse|traction|squat|soulevé|dips|fente|hip thrust/i;
-const reposDe = (nom) => lire(`carnet:repos:${nom}`) ?? (mesureDe(nom) !== "charge" ? 30 : POLY.test(nom) ? 150 : 90);
+const reposDe = (nom) => {
+  const ex = ctx?.exercices?.find((x) => x.nom === nom);
+  if (mesureDe(nom) === "duree" || ex?.seance === "posture") return 30;
+  return (schemaDe(nom).reps ?? 8) <= 6 ? 150 : 90;
+};
 let minu = lire("carnet:minuteur");   // {nom, quoi, cible, duree, fin, restant (si en pause), mode}
 let tic = null, sonne = false;
 // Les boutons ne sont réécrits que s'ils changent : réécrits à chaque tic (4 fois par seconde),
@@ -1624,6 +1648,13 @@ function finExercice(nom) {
   garder();
   setTimeout(() => { if (minu?.mode === "fin" && minu.nom === nom) arreterRepos(); }, 12000);
 }
+// Superset : pas de repos, on ouvre le partenaire et on enchaîne sa série. Le repos (120 s) viendra
+// après la série du partenaire. « Repos seul » débranche la paire pour la séance.
+function enchainerSuperset(partner, selfNom) {
+  minu = { nom: partner, quoi: `Superset — enchaîne : ${partner}`, cible: "sans repos", duree: 0, fin: 0, restant: null, mode: "superset", ssFrom: selfNom };
+  ouvert = partner; sonne = false;
+  garder();
+}
 function garder() { ecrire("carnet:minuteur", minu); clearInterval(tic); tic = setInterval(majRepos, 250); majRepos(); prevenirSW(); }
 function arreterRepos() { minu = null; localStorage.removeItem("carnet:minuteur"); clearInterval(tic); $("#minuteur").className = "minuteur"; prevenirSW(); }
 // La fin du repos en notification, pour qui passe sur une autre appli entre deux séries : la page en
@@ -1640,6 +1671,13 @@ function majRepos() {
   $("#min-quoi").textContent = minu.quoi;
   majEffort();
   $("#min-cible").textContent = minu.cible || "";
+  if (minu.mode === "superset") {
+    el.className = "minuteur actif";
+    $("#chrono").textContent = "⚡";
+    $("#min-jauge").style.width = "0";
+    boutons(`<button data-min="repos-seul">Repos seul</button><span></span><button data-min="stop" class="fort">OK</button>`);
+    return;
+  }
   if (minu.mode === "fin") {
     el.className = "minuteur actif";
     $("#chrono").textContent = "";
@@ -1706,6 +1744,11 @@ $("#minuteur").addEventListener("click", (ev) => {
   if (!b || !minu) return;
   const a = b.dataset.min;
   if (a === "stop") return arreterRepos();
+  if (a === "repos-seul") {   // débrancher le superset pour la séance et faire un repos normal
+    const from = minu.ssFrom, partner = minu.nom;
+    if (from && partner) ssOff.add(clefSuperset(from, partner));
+    return lancerRepos(from || partner, `${from || partner} · repos`, "");
+  }
   if (a === "repos2" || a === "repos1") {
     minu = { ...minu, mode: "repos", quoi: `Repos avant l'exercice suivant`, cible: "", duree: a === "repos2" ? 120 : 90 };
     minu.fin = Date.now() + minu.duree * 1000; sonne = false;
@@ -1715,8 +1758,7 @@ $("#minuteur").addEventListener("click", (ev) => {
   } else {
     const d = Number(a);
     if (minu.restant != null) minu.restant += d; else minu.fin += d * 1000;
-    minu.duree = Math.max(15, minu.duree + d);
-    if (minu.nom && minu.mode === "repos" && !minu.impose && !minu.quoi.startsWith("Repos avant")) ecrire(`carnet:repos:${minu.nom}`, minu.duree);
+    minu.duree = Math.max(15, minu.duree + d);   // rattrapage du chrono en cours uniquement : jamais mémorisé
     if ((minu.restant ?? (minu.fin - Date.now()) / 1000) > 0) sonne = false;
   }
   garder();
