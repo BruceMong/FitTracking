@@ -107,7 +107,20 @@ function schemaDe(nom) {
 // On enchaîne une série de chacun, puis un seul repos (120 s). Clé stable d'une paire = les deux noms triés.
 const partenaireSuperset = (nom) => ctx?.supersets?.[nom];
 const clefSuperset = (a, b) => [a, b].sort().join(" + ");
-const ssOff = new Set();   // paires débranchées pour la séance (« Repos seul » : machine occupée)
+// Paires débranchées pour la journée (machine prise, pas envie) : l'étiquette ⚡ de la carte bascule, ou
+// « Sans superset » pendant l'enchaînement. Gardé par jour dans le téléphone : un rafraîchissement ne la rebranche pas.
+const SS_OFF = `carnet:ss-off:${jour}`;
+const ssOff = new Set(lire(SS_OFF, []));
+try { for (const k of Object.keys(localStorage)) if (k.startsWith("carnet:ss-off:") && k !== SS_OFF) localStorage.removeItem(k); } catch {}
+const ssActif = (nom) => { const p = partenaireSuperset(nom); return !!p && !ssOff.has(clefSuperset(nom, p)); };
+function couperSuperset(a, b, off) {
+  const k = clefSuperset(a, b);
+  if (off) ssOff.add(k); else ssOff.delete(k);
+  ecrire(SS_OFF, [...ssOff]);
+  // Rien fait encore sur la paire : elle n'est plus marquée superset dans seances.md.
+  const s = seanceDuJour(), ea = s.exos.find((x) => x.nom === a), eb = s.exos.find((x) => x.nom === b);
+  if (off && !ea?.series?.length && !eb?.series?.length) { if (ea) delete ea.ss; if (eb) delete eb.ss; }
+}
 
 function cible(der, nom) {
   // Double progression, même règle que le panneau Santé (herdr-sante, cible) : charge gardée tant
@@ -464,7 +477,9 @@ function dessiner() {
     const tg = [];
     if (g) tg.push(`<span class="tag ${rc[g] != null ? etatRecup(rc[g]) : ""}">${esc(g)}${rc[g] >= 0.25 ? ` · ${Math.round(rc[g] * 100)} %` : ""}</span>`);
     const partN = partenaireSuperset(nom);
-    if (partN) tg.push(`<span class="tag">⚡ superset · ${esc(partN)}</span>`);
+    if (partN) tg.push(ssActif(nom)
+      ? `<button class="tag ss" data-superset="${esc(nom)}">⚡ superset · ${esc(partN)} <b>✕</b></button>`
+      : `<button class="tag ss off" data-superset="${esc(nom)}">sans superset · <b>réactiver</b></button>`);
     if (rec?.charge) tg.push(`<span class="tag">record ${kg(rec.charge)} kg</span>`);
     else if (rec?.reps) tg.push(`<span class="tag">record ${rec.reps} reps</span>`);
     if (hp) tg.push(`<span class="tag jaune">hors progression</span>`);
@@ -1240,6 +1255,16 @@ document.addEventListener("click", (ev) => {
     ouvrirFiche(t.dataset.fiche); return;
   } else if (t.dataset.soin) {
     ouvrirSoin(t.dataset.soin); return;
+  } else if (t.dataset.superset) {
+    // L'étiquette ⚡ coupe (ou rebranche) la paire pour la journée ; chaque exercice se fait alors seul.
+    const a = t.dataset.superset, b = partenaireSuperset(a), off = ssActif(a);
+    couperSuperset(a, b, off);
+    if (off && minu?.mode === "superset" && [a, b].includes(minu.nom)) {
+      const from = minu.ssFrom || minu.nom;
+      lancerRepos(from, `${from} · repos`, "");
+    }
+    toast(off ? `Sans superset aujourd'hui : ${a}, puis ${b}` : `Superset rebranché : ${a} ↔ ${b}`);
+    dessiner(); return;
   } else if (t.closest("[data-memo]")) {
     memoEdite = t.closest("[data-memo]").dataset.memo;
     dessiner(); setTimeout(() => $("#memo-champ")?.focus(), 0); return;
@@ -1355,7 +1380,7 @@ document.addEventListener("click", (ev) => {
     sauver();
     // Superset : si le partenaire est encore en retard, on enchaîne sans repos ; sinon repos de 120 s
     // après la paire. « Repos seul » (ssOff) débranche la paire pour la séance (machine occupée).
-    const part = partenaireSuperset(nom), ssOn = part && !ssOff.has(clefSuperset(nom, part));
+    const part = partenaireSuperset(nom), ssOn = ssActif(nom);
     const pExo = part ? s.exos.find((x) => x.nom === part) : null;
     if (ssOn) { e.ss = clefSuperset(nom, part); if (pExo) pExo.ss = e.ss; }
     const selfFini = e.series.length >= n && !L.some((x) => x.k > k0);
@@ -1694,7 +1719,7 @@ function majRepos() {
     el.className = "minuteur actif";
     $("#chrono").textContent = "⚡";
     $("#min-jauge").style.width = "0";
-    boutons(`<button data-min="repos-seul">Repos seul</button><span></span><button data-min="stop" class="fort">OK</button>`);
+    boutons(`<button data-min="repos-seul">Sans superset</button><span></span><button data-min="stop" class="fort">OK</button>`);
     return;
   }
   if (minu.mode === "fin") {
@@ -1765,7 +1790,7 @@ $("#minuteur").addEventListener("click", (ev) => {
   if (a === "stop") return arreterRepos();
   if (a === "repos-seul") {   // débrancher le superset pour la séance et faire un repos normal
     const from = minu.ssFrom, partner = minu.nom;
-    if (from && partner) ssOff.add(clefSuperset(from, partner));
+    if (from && partner) couperSuperset(from, partner, true);
     return lancerRepos(from || partner, `${from || partner} · repos`, "");
   }
   if (a === "repos2" || a === "repos1") {

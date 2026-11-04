@@ -45,6 +45,9 @@ service worker) pour noter ses séries au téléphone, à la salle, même sans r
   repos d'une minute. Gardé à part (`ech`), écrit entre parenthèses dans seances.md : hors volume, récupération et cible.
 - **Hors progression** : un exercice, ou toute la séance, un jour de douleur ou sans forme. Compté pour le volume et la
   récupération, pas pour la cible, les records ni les courbes (`(hors progression)` dans seances.md, lu par le panneau).
+- **Superset** : les paires de `programme.md` s'enchaînent (une série de chacun, puis 120 s de repos). L'étiquette
+  « ⚡ superset · X ✕ » de la carte coupe la paire pour la journée (« réactiver » la rebranche) : chaque exercice se fait
+  alors seul, avec son repos normal. Même effet que « Sans superset » pendant l'enchaînement. Gardé par jour sur le téléphone.
 - **Remplacer** (machine prise) : les exercices du même muscle d'abord ; le remplaçant prend la place dans la séance.
 - **Bilan de la séance** (sous les exercices) : chaque exercice face à la dernière fois (↑ = ↓), la cible de la
   prochaine séance tirée de la même règle, les records battus, séries et durée.
