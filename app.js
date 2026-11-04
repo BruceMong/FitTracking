@@ -9,7 +9,7 @@
 // Hors ligne d'abord : chaque série est gardée sur le téléphone avant d'être envoyée, et renvoyée
 // dès que le réseau revient. Une séance = un document par jour, réécrit en entier.
 
-import { FICHES } from "./fiches.js";
+import { FICHES, SOINS } from "./fiches.js";
 import { pictosDe } from "./pictos.js";
 import { CORPS } from "./corps.js";
 
@@ -969,8 +969,10 @@ function aujourdhuiSante() {
     const n = routine.filter((r) => j.Fait[r.cle] || r.auto).length;
     h += `<div class="carte"><b>Routine du jour</b> <span class="sous">${n}/${routine.length}</span>`
       + routine.map((r) => { const ok = j.Fait[r.cle] || r.auto;
-        return `<button class="case ${ok ? "faite" : ""}" data-routine="${esc(r.cle)}" ${r.auto ? "disabled" : ""}><i>${ok ? "✓" : ""}</i>
-          <span><b>${esc(r.titre)}</b>${r.detail ? `<span class="sous">${esc(r.detail)}</span>` : ""}</span></button>`; }).join("")
+        const c = `<button class="case ${ok ? "faite" : ""}" data-routine="${esc(r.cle)}" ${r.auto ? "disabled" : ""}><i>${ok ? "✓" : ""}</i>
+          <span><b>${esc(r.titre)}</b>${r.detail ? `<span class="sous">${esc(r.detail)}</span>` : ""}</span></button>`;
+        // Les soins de peau ont leur « i » : le geste en détail (fiches.js, SOINS).
+        return SOINS[r.cle] ? `<div class="case-ligne">${c}<button class="info" data-soin="${esc(r.cle)}" aria-label="Comment faire">i</button></div>` : c; }).join("")
       + `</div>`;
   }
   return h;
@@ -1236,6 +1238,8 @@ document.addEventListener("click", (ev) => {
   const s = seanceDuJour();
   if (t.dataset.fiche) {
     ouvrirFiche(t.dataset.fiche); return;
+  } else if (t.dataset.soin) {
+    ouvrirSoin(t.dataset.soin); return;
   } else if (t.closest("[data-memo]")) {
     memoEdite = t.closest("[data-memo]").dataset.memo;
     dessiner(); setTimeout(() => $("#memo-champ")?.focus(), 0); return;
@@ -1503,6 +1507,20 @@ function ouvrirFiche(nom) {
   $("#fiche-contenu").dataset.demos = JSON.stringify(ids);
   $("#fiche").showModal();
   $("#fiche").scrollTop = 0;   // une fiche s'ouvre toujours en haut, sur les images
+}
+// Fiche de soin (le « i » d'une case de peau de la routine) : les étapes en détail, dans la même bulle.
+// Tant que le gel nettoyant est à acheter (une ligne « à acheter » de la routine), l'étape 1 dit eau tiède.
+function ouvrirSoin(cle) {
+  const f = SOINS[cle];
+  const sansGel = f.sansGel && (ctx?.sante?.routine || []).some((r) => r.cle.startsWith("achat:") && /nettoyant/i.test(r.detail));
+  const etapes = f.etapes.map(([t, x], i) => [t, i === 0 && sansGel ? f.sansGel : x]);
+  $("#fiche-contenu").innerHTML = `<h2>${esc(f.titre)}</h2><div class="f-dosage">${esc(f.duree)}</div>
+    <ol class="f-etapes">${etapes.map(([t, x]) => `<li><b>${esc(t)}</b> ${esc(x)}</li>`).join("")}</ol>
+    <div class="f-titre">Astuces</div><ul class="f-astuces">${f.astuces.map((c) => `<li>${esc(c)}</li>`).join("")}</ul>
+    <div class="f-titre">À éviter</div><ul class="f-eviter">${f.eviter.map((c) => `<li>${esc(c)}</li>`).join("")}</ul>`;
+  $("#fiche-contenu").dataset.demos = "[]";
+  $("#fiche").showModal();
+  $("#fiche").scrollTop = 0;
 }
 $("#fiche").addEventListener("click", (ev) => {
   if (ev.target.closest("[data-voir]")) {

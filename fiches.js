@@ -945,3 +945,42 @@ export const FICHES = {
     eviter: ["Poser les mains à plat : impossible de se rattraper avec les doigts.", "Regarder vers ses pieds, ce qui fait basculer en avant.", "S'installer face à une surface dure sans protéger la tête."],
   },
 };
+
+// Fiches de soin : le « i » à côté des cases de peau de la routine du jour (clé = clé de la case,
+// envoyée par carnet-sync). Le détail du geste, d'après sante/peau/README.md et les notices Avène.
+// `sansGel` remplace la première étape tant que le gel nettoyant est à acheter.
+const NETTOYER_SANS_GEL = "Eau tiède seule, tant que le gel nettoyant n'est pas acheté : mouiller le visage, masser du bout des doigts 30 secondes en petits cercles (front, nez, menton), rincer, tapoter avec une serviette propre sans frotter.";
+export const SOINS = {
+  "soin-matin": {
+    titre: "Soin du matin", duree: "2 minutes · avant de sortir",
+    etapes: [
+      ["Nettoyer", "Mains propres. Mouiller le visage à l'eau tiède (pas chaude). Une noisette de gel nettoyant, la faire mousser entre les mains, masser 30 secondes en petits cercles, en insistant sur la zone T (front, nez, menton). Rincer, puis tapoter avec une serviette propre, sans frotter."],
+      ["Comedomed", "Sur peau sèche : une petite noisette, étalée en couche fine sur tout le visage, surtout la zone T. Éviter le contour des yeux et les lèvres. Il sert aussi d'hydratant. Laisser pénétrer une minute."],
+      ["SPF 50+", "En dernier : deux longueurs de doigt de crème pour le visage et le cou, sans oublier les oreilles et le haut du nez. 15 minutes avant de sortir, tous les jours, même en hiver ou par temps gris. Dehors longtemps : en remettre toutes les 2 heures."],
+    ],
+    sansGel: NETTOYER_SANS_GEL,
+    astuces: ["L'écran solaire n'est pas facultatif : l'exfoliant du soir rend la peau plus sensible au soleil, et les UV aggravent les marques.", "Tube de SPF ouvert depuis plus de 12 mois, ou texture changée : le racheter.", "Après le sport : refaire juste l'étape 1 et le Comedomed."],
+    eviter: ["Eau chaude : elle décape, et la peau répond par plus de sébum.", "Savon ou gel douche sur le visage.", "Frotter avec la serviette."],
+  },
+  "soin-soir": {
+    titre: "Soin du soir", duree: "3 minutes · avant de dormir",
+    etapes: [
+      ["Nettoyer", "Comme le matin, mais masser 60 secondes : il faut enlever l'écran solaire et le sébum de la journée. Rincer à l'eau tiède, tapoter avec une serviette propre."],
+      ["Exfoliant, les soirs où sa case est là", "Sérum A.H.A. sur peau bien sèche : voir le « i » de la case exfoliant. Les autres soirs, passer directement à l'étape 3."],
+      ["Comedomed", "Une petite noisette en couche fine sur tout le visage, en évitant les yeux et les lèvres. Si les joues tirent : un peu de crème nutritive sur les joues seulement, jamais sur la zone T."],
+    ],
+    sansGel: NETTOYER_SANS_GEL,
+    astuces: ["Un soir sauté ne se rattrape pas : on reprend simplement le lendemain.", "Changer la taie d'oreiller chaque semaine, nettoyer l'écran du téléphone.", "Les résultats se jugent après 8 à 12 semaines : un pore met 4 à 8 semaines à se vider et se renouveler."],
+    eviter: ["Presser les points noirs avec les doigts : inflammation, cicatrice, pore élargi.", "Patchs et bandes pour le nez, gommages à grains (sucre, noyaux).", "Ajouter un autre acide, ou Rosamed, le même soir que l'exfoliant."],
+  },
+  "exfoliant": {
+    titre: "Exfoliant (sérum A.H.A.)", duree: "Le soir, après le nettoyage · 1 minute",
+    etapes: [
+      ["Peau propre et bien sèche", "Après le nettoyage, attendre une à deux minutes que le visage soit complètement sec : sur peau humide, l'acide pénètre trop et pique davantage."],
+      ["3 à 4 gouttes", "Dans le creux de la main ou au bout des doigts, puis appliquer en tapotant sur tout le visage, surtout la zone T. Éviter le contour des yeux, les lèvres et les coins du nez s'ils sont irrités."],
+      ["Laisser agir, sans rincer", "Une à deux minutes, le temps qu'il pénètre. Puis le Comedomed par-dessus, comme d'habitude."],
+    ],
+    astuces: ["Un léger picotement les premières fois est normal.", "Une petite poussée de boutons les premières semaines (« purge ») est possible : si l'irritation dure plus de deux semaines, espacer.", "Le lendemain matin, l'écran solaire est indispensable.", "Le rythme (un soir sur deux, puis tous les soirs) est calculé par le PC : la case n'apparaît que les soirs prévus."],
+    eviter: ["S'il brûle ou rougit : rincer à l'eau fraîche, mettre le Comedomed, et sauter l'exfoliant le soir suivant.", "En remettre plus de 4 gouttes pour aller plus vite.", "Le mettre sur une peau irritée, coupée ou juste rasée."],
+  },
+};

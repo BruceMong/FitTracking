@@ -162,6 +162,13 @@
   .case b { font-weight: 500; display: block; }
   .case .sous { display: block; font-size: 13px; margin-top: 2px; }
   .case:disabled { opacity: 1; }
+  /* Une case de soin de peau et son « i » (le geste en détail) */
+  .case-ligne { display: flex; align-items: flex-start; gap: 10px; border-bottom: 1px solid var(--ligne); }
+  .case-ligne:last-child { border-bottom: 0; }
+  .case-ligne > .case { flex: 1; min-width: 0; border-bottom: 0; }
+  .case-ligne > .info { margin-top: 11px; }
+  #fiche ol.f-etapes li { margin-bottom: 8px; }
+  #fiche ol.f-etapes b { display: block; }
   /* Fiche d'exercice : le « i » à côté du nom, la bulle qui s'ouvre */
   .exo h3 .nom { display: flex; align-items: center; gap: 8px; min-width: 0; }
   .info { flex: none; width: 22px; height: 22px; border-radius: 50%; border: 1px solid var(--doux); background: none;
