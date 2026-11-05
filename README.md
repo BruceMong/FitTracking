@@ -72,6 +72,12 @@ service worker) pour noter ses séries au téléphone, à la salle, même sans r
   récupération, muscles négligés (jours depuis la dernière série). Santé : le poids en moyenne par semaine.
   charge), douleur à l'épaule, allure de course.
 - Les courbes sont en SVG écrit à la main, sans bibliothèque, pour marcher hors ligne.
+- **Rapport sport** (onglet Santé, depuis le 2026-11-05) : le rapport que Claude écrit chaque dimanche sur le PC
+  (`sante-rapport`), poussé dans le contexte (`ctx.rapports`, les 12 derniers, en markdown). La carte montre « En bref »
+  et les indicateurs face au rapport d'avant ; « Lire le rapport » déplie le reste ; les dates ouvrent les précédents.
+  Rendu markdown restreint, fait main (`md()`), tout échappé.
+- **Base** : schéma dans `supabase/schema.sql` (tables, fonctions, comment recréer le projet). Sauvegarde hebdomadaire
+  sur le PC par `carnet-sauvegarde` (dépôt arch-config).
 - **Photos de suivi** : redimensionnées sur le téléphone (1280 px, JPEG), déposées dans une table de
   transit ; le PC les range dans son dossier puis les efface de la base.
 

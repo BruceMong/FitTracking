@@ -122,6 +122,9 @@ function couperSuperset(a, b, off) {
   if (off && !ea?.series?.length && !eb?.series?.length) { if (ea) delete ea.ss; if (eb) delete eb.ss; }
 }
 
+// Jamais deux crans d'un coup sur ces exercices : l'épaule droite (même liste que herdr-sante, PRUDENCE).
+const PRUDENCE = new Set(["Développé militaire"]);
+
 function cible(der, nom) {
   // Double progression, même règle que le panneau Santé (herdr-sante, cible) : charge gardée tant
   // que le schéma n'est pas tenu à la charge la plus haute, puis charge suivante ; deux crans si
@@ -139,10 +142,12 @@ function cible(der, nom) {
     return { texte: `rien de gagné en 3 séances → décharge : ${kg(h.decharge)} kg, ${n}×${reps} sans forcer, puis on remonte`,
              c: h.decharge, r: reps, decharge: true };
   if (aHaut.length >= n && Math.min(...aHaut) >= reps) {
+    // Après une hausse : 75 % du schéma, d'où l'on remonte (4×8 → 6-7, 4×6 → 5-6, 3×12 → 9-10).
+    const bas = Math.max(1, Math.round(reps * 0.75));
     const notes = series.map((x, i) => [x[0], der.rir?.[i]]).filter(([c, e]) => c === haut && e != null).map((x) => x[1]);
-    if (notes.length >= n && Math.min(...notes) >= 3)
-      return { texte: `${n}×${reps} tenu, 3 en réserve partout → deux crans (+5 kg), vise ${n}×6-7`, c: haut, r: 6, monte: true };
-    return { texte: `${n}×${reps} tenu → charge suivante, vise ${n}×6-7`, c: haut, r: 6, monte: true };
+    if (notes.length >= n && Math.min(...notes) >= 3 && !PRUDENCE.has(nom))
+      return { texte: `${n}×${reps} tenu, 3 en réserve partout → deux crans (+5 kg, ou deux paires d'haltères au-dessus), vise ${n}×${bas}-${bas + 1}`, c: haut, r: bas, monte: true };
+    return { texte: `${n}×${reps} tenu → charge suivante, vise ${n}×${bas}-${bas + 1}`, c: haut, r: bas, monte: true };
   }
   if (aHaut.length < n) return { texte: `reste à ${kg(haut)} : vise ${n} séries`, c: haut, r: reps };
   const vise = [...aHaut].sort((a, b) => b - a).slice(0, n);
@@ -1143,6 +1148,93 @@ function carteRepas() {
   return h + `</div>`;
 }
 
+// ───────────────────────────────────────── le rapport sport
+
+// Écrit par Claude chaque dimanche (sante-rapport, sur le PC), poussé dans ctx.rapports, le plus
+// récent d'abord, en markdown. La carte montre « En bref » et les indicateurs face au rapport
+// d'avant ; « Lire le rapport » déplie le reste ; les dates en dessous ouvrent les précédents.
+let rapportChoisi = 0, rapportOuvert = false;
+
+// Un markdown restreint, celui que la consigne impose : titres, paragraphes, listes et cases,
+// tableaux, **gras**, *italique*, `code`. Tout est échappé avant.
+function mdEnLigne(s) {
+  return esc(s).replace(/\*\*(.+?)\*\*/g, "<b>$1</b>").replace(/`(.+?)`/g, "<code>$1</code>")
+    .replace(/(^|[\s(])\*(?!\s)(.+?)\*(?=[\s.,;:)]|$)/g, "$1<i>$2</i>");
+}
+function md(texte) {
+  const L = texte.split("\n"), out = [];
+  const cellules = (l) => l.trim().replace(/^\||\|$/g, "").split("|").map((c) => c.trim());
+  for (let i = 0; i < L.length; i++) {
+    const l = L[i];
+    if (!l.trim()) continue;
+    let m;
+    if ((m = l.match(/^(#{1,3})\s+(.*)/))) { out.push(`<h${m[1].length + 3} class="md-t">${mdEnLigne(m[2])}</h${m[1].length + 3}>`); continue; }
+    if (l.trim().startsWith("|")) {
+      const rangs = [];
+      while (i < L.length && L[i].trim().startsWith("|")) { if (!/^\s*\|[\s|:-]+\|\s*$/.test(L[i])) rangs.push(cellules(L[i])); i++; }
+      i--;
+      const [tete, ...corps] = rangs;
+      out.push(`<div class="md-tab"><table><thead><tr>${tete.map((c) => `<th>${mdEnLigne(c)}</th>`).join("")}</tr></thead>
+        <tbody>${corps.map((r) => `<tr>${r.map((c) => `<td>${mdEnLigne(c)}</td>`).join("")}</tr>`).join("")}</tbody></table></div>`);
+      continue;
+    }
+    if (/^\s*- /.test(l)) {
+      const items = [];
+      while (i < L.length && /^\s*(- |\s{2,}\S)/.test(L[i])) {
+        if (/^\s*- /.test(L[i])) items.push(L[i].replace(/^\s*- /, "")); else items[items.length - 1] += " " + L[i].trim();
+        i++;
+      }
+      i--;
+      out.push(`<ul class="md-l">${items.map((x) => {
+        const c = x.match(/^\[( |x)\]\s*(.*)/i);
+        return c ? `<li class="md-case"><i>${c[1].trim() ? "✓" : ""}</i>${mdEnLigne(c[2])}</li>` : `<li>${mdEnLigne(x)}</li>`;
+      }).join("")}</ul>`);
+      continue;
+    }
+    const para = [l.trim()];
+    while (i + 1 < L.length && L[i + 1].trim() && !/^(#|\s*\||\s*- )/.test(L[i + 1])) para.push(L[++i].trim());
+    out.push(`<p>${mdEnLigne(para.join(" "))}</p>`);
+  }
+  return out.join("");
+}
+
+// Une section « ## Titre » du rapport, sans son titre.
+const sectionMd = (texte, titre) => {
+  const m = texte.match(new RegExp(`^## ${titre}\\s*\\n([\\s\\S]*?)(?=^## |(?![\\s\\S]))`, "m"));
+  return m ? m[1].trim() : "";
+};
+// Le tableau des indicateurs : mesure → valeur.
+const indicateurs = (texte) => Object.fromEntries(sectionMd(texte, "Indicateurs").split("\n")
+  .filter((l) => l.trim().startsWith("|") && !/^\s*\|[\s|:-]+\|\s*$/.test(l))
+  .slice(1).map((l) => l.trim().replace(/^\||\|$/g, "").split("|").map((c) => c.trim())).map(([k, v, c]) => [k, { v, c }]));
+
+function carteRapport() {
+  const R = ctx?.rapports || [];
+  if (!R.length) return "";
+  const i = Math.min(rapportChoisi, R.length - 1), r = R[i], avant = R[i + 1];
+  const age = Math.round((new Date(jour) - new Date(r.jour)) / 864e5);
+  const ind = indicateurs(r.md), ind0 = avant ? indicateurs(avant.md) : {};
+  let h = `<div class="carte rapport"><div class="c-tete"><b>Rapport sport</b>
+    <span class="sous">${quand(r.jour)}${age > 1 ? ` · il y a ${age} j` : ""}${i ? "" : " · le dernier"}</span></div>`;
+  const bref = sectionMd(r.md, "En bref");
+  if (bref) h += `<div class="md">${md(bref)}</div>`;
+  const lignes = Object.entries(ind);
+  if (lignes.length) {
+    h += `<div class="md-tab"><table class="rp-ind"><thead><tr><th></th><th>${jj(r.jour)}</th>${avant ? `<th>${jj(avant.jour)}</th>` : ""}</tr></thead><tbody>`
+      + lignes.map(([k, x]) => `<tr><td>${mdEnLigne(k)}${x.c ? `<span class="sous">cible ${mdEnLigne(x.c)}</span>` : ""}</td>
+        <td>${mdEnLigne(x.v)}</td>${avant ? `<td class="sous">${mdEnLigne(ind0[k]?.v ?? "–")}</td>` : ""}</tr>`).join("")
+      + `</tbody></table></div>`;
+  }
+  if (rapportOuvert) {
+    const reste = r.md.replace(/^# .*\n/, "").replace(/^## (En bref|Indicateurs)\s*\n[\s\S]*?(?=^## )/gm, "");
+    h += `<div class="md">${md(reste)}</div>`;
+  }
+  h += `<button class="lien" data-rapport-ouvrir>${rapportOuvert ? "Replier" : "Lire le rapport"}</button>`;
+  if (R.length > 1)
+    h += `<div class="periode rp-dates">${R.map((x, k) => `<button data-rapport="${k}" class="${k === i ? "choisi" : ""}">${jj(x.jour)}</button>`).join("")}</div>`;
+  return h + `<p class="sous">Écrit par Claude chaque dimanche soir, d'après tes séances, ta montre et ton journal. Pas un avis médical.</p></div>`;
+}
+
 function sante() {
   const S = ctx?.sante;
   if (!S) return `<div class="carte sous">Le PC n'a pas encore envoyé tes données de santé : il le fera à sa prochaine synchro.</div>`;
@@ -1152,6 +1244,7 @@ function sante() {
 
   for (const a of S.alertes || []) h += `<div class="carte alerte-carte">${esc(a)}</div>`;
   h += aujourdhuiSante();
+  h += carteRapport();
   h += carteRepas();
   h += carteCap();
 
@@ -1288,6 +1381,10 @@ document.addEventListener("click", (ev) => {
     repasOuvert = null; sauver();
   } else if (t.dataset.repas) {
     repasOuvert = repasOuvert === t.dataset.repas ? null : t.dataset.repas;
+  } else if (t.hasAttribute("data-rapport-ouvrir")) {
+    rapportOuvert = !rapportOuvert;
+  } else if (t.dataset.rapport != null) {
+    rapportChoisi = Number(t.dataset.rapport); rapportOuvert = false;
   } else if (t.dataset.cap) {
     capAction(t.dataset.cap);
   } else if (t.dataset.routine) {
