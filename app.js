@@ -439,7 +439,8 @@ function dessiner() {
   if (c && ctx.aujourdhui === jour) {
     h += `<div class="carte conseil ${esc(c.niveau)}"><b>${esc(c.titre)}</b>${esc(c.texte)}`
       + (c.fatigue?.length ? `<div class="sous">↓ ${esc(c.fatigue.join(" · "))}</div>` : "")
-      + (c.forme?.length ? `<div class="sous">↑ ${esc(c.forme.join(" · "))}</div>` : "") + `</div>`;
+      + (c.forme?.length ? `<div class="sous">↑ ${esc(c.forme.join(" · "))}</div>` : "")
+      + (c.fond?.length ? `<div class="sous">≈ en fond : ${esc(c.fond.join(" · "))}</div>` : "") + `</div>`;
   } else if (p === "repos") {
     h += `<div class="carte conseil"><b>Repos selon la rotation</b>Posture et étirements sur le tapis.</div>`;
   }
@@ -973,6 +974,7 @@ function journalDuJour() {
   for (const k of ["Énergie", "Humeur", "Peau"]) j[k] = etatGeste("journal", k, base?.[k] ?? null);
   j.Note = etatGeste("journal", "Note", base?.Note || "");
   for (const r of S?.routine || []) j.Fait[r.cle] = etatGeste("journal", `Fait:${r.cle}`, (base?.Fait || []).includes(r.cle));
+  j.Fait.alcool = etatGeste("journal", "Fait:alcool", (base?.Fait || []).includes("alcool"));   // hors routine
   return j;
 }
 
@@ -984,7 +986,10 @@ function aujourdhuiSante() {
   for (const k of ["Énergie", "Humeur", "Peau"])
     h += `<span class="r-nom">${k}</span><span class="cinq">${[1, 2, 3, 4, 5].map((n) => `<button data-ressenti="${k}" data-n="${n}"
       class="${j[k] === n ? "choisi" : ""}" style="${j[k] === n ? `background:${ton(n)}` : ""}">${n}</button>`).join("")}</span>`;
-  h += `</div><textarea id="note-jour" placeholder="Note du jour : sommeil, forme, ce qui a compté…">${esc(j.Note)}</textarea></div>`;
+  h += `</div><textarea id="note-jour" placeholder="Note du jour : sommeil, forme, ce qui a compté…">${esc(j.Note)}</textarea>`;
+  // Hors routine : lu par le conseil du jour du PC (signaux de herdr-sante), compté dans le rapport du dimanche.
+  h += `<button class="case ${j.Fait.alcool ? "faite" : ""}" data-routine="alcool"><i>${j.Fait.alcool ? "✓" : ""}</i>
+    <span><b>Alcool hier soir</b><span class="sous">${j.Fait.alcool ? "compté dans le conseil du jour (à la prochaine synchro du PC)" : "à cocher si tu as bu : le conseil du jour en tient compte"}</span></span></button></div>`;
   if (routine.length) {
     const n = routine.filter((r) => j.Fait[r.cle] || r.auto).length;
     h += `<div class="carte"><b>Routine du jour</b> <span class="sous">${n}/${routine.length}</span>`
