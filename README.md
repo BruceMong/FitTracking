@@ -25,9 +25,6 @@ service worker) pour noter ses séries au téléphone, à la salle, même sans r
 - **Repas** (onglet Santé) : « Photo du repas », avec une précision facultative. La photo part au PC comme les photos
   de suivi ; `carnet-sync` la fait estimer par Claude (calories, protéines, glucides, lipides, plat par plat) et renvoie
   le total du jour face aux cibles d'objectifs.md, le détail de chaque repas et les 7 derniers jours. ±20-30 %.
-- **Cap** (onglet Santé) : le suivi d'une habitude à faire baisser. Compteurs du jour, bouton « envie » qui lance
-  10 minutes avec une chose à faire à la place, tendance sur 14 jours, cible de la semaine (moyenne de la précédente
-  moins un), moments à risque. Noté dans la journée du carnet (`cap`) ; le PC le recopie dans son suivi.
 - **Fiches d'exercice** : le « i » à côté du nom ouvre la machine en photo (départ, arrivée), son nom
   anglais, les muscles, trois consignes, l'erreur à éviter et le mémo de réglage. Textes dans `fiches.js`
   (clé = nom exact de `sante/sport/exercices.md`), photos de free-exercise-db (domaine public) dans
