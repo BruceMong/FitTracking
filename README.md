@@ -72,6 +72,15 @@ service worker) pour noter ses séries au téléphone, à la salle, même sans r
   récupération, muscles négligés (jours depuis la dernière série). Santé : le poids en moyenne par semaine.
   charge), douleur à l'épaule, allure de course.
 - Les courbes sont en SVG écrit à la main, sans bibliothèque, pour marcher hors ligne.
+- **Grand format** (facultatif, depuis le 2026-11-06) : tout le menu de série en plein écran, pour le lire et le toucher dans
+  une fenêtre réduite, à côté d'une autre appli. S'ouvre par l'icône du minuteur ou « Grand format » dans une carte ouverte ;
+  reste actif de repos en repos jusqu'à ce qu'on le referme (icône, ou geste retour). Quatre états : `repos` (toute la fenêtre
+  sert de jauge, verte dans les 10 dernières secondes), `fini` (clignote en vert à 1 Hz, fixe après 90 s ou si l'animation est
+  réduite), `serie` (− / + et « Série faite »), `fin` (dernier exercice de la séance). Entre deux exercices, pas d'arrêt : à la dernière série, le
+  repos de transition (2:00) part tout seul et l'écran annonce déjà le suivant, dans l'ordre du programme ; « + une série » reste sur
+  l'exercice, et ‹ › en choisit un autre si la machine est prise. Il réutilise les boutons de l'appli : une série
+  notée ici est une série comme une autre. Les tailles suivent la fenêtre, et les paliers de hauteur (620, 430, 340, 300, 240 px)
+  retirent le secondaire. Tester : jamais sur le port 9333 (ZapZap) ni 9222 (Chrome de Bruce).
 - **Rapport sport** (onglet Santé, depuis le 2026-11-05) : le rapport que Claude écrit chaque dimanche sur le PC
   (`sante-rapport`), poussé dans le contexte (`ctx.rapports`, les 12 derniers, en markdown). La carte montre « En bref »
   et les indicateurs face au rapport d'avant ; « Lire le rapport » déplie le reste ; les dates ouvrent les précédents.

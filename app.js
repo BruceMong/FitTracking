@@ -51,6 +51,8 @@ async function api(fonction, params = {}) {
 // ───────────────────────────────────────── l'état
 
 let ctx = lire("carnet:ctx");                  // contexte poussé par le PC
+// Grand format (voir plus bas) : grandPref survit d'une séance à l'autre, grandVu dit s'il est à l'écran.
+let grandPref = lire("carnet:grand", false), grandVu = false, grandEtat = "";
 let distantes = lire("carnet:seances", []);    // séances des 90 derniers jours, vues du serveur
 const jour = aujourdhui();
 let doc = lire(`carnet:seance:${jour}`)?.doc || null;
@@ -419,7 +421,9 @@ function exosAffiches(d) {
   return prevus;
 }
 
-function dessiner() {
+function dessiner() { dessinerPage(); majGrand(true); }
+
+function dessinerPage() {
   const app = $("#app");
   const d = new Date();
   $("#titre").textContent = `${JOURS[d.getDay()]} ${jj(jour)}`;
@@ -530,7 +534,8 @@ function dessiner() {
         : `<div class="ls-tete sans-kg"><span></span><span>${mode === "duree" ? "tenue en secondes" : "répétitions, sans charge"}</span>
             <button class="lien petit" data-mesure="${mode === "duree" ? "reps" : "duree"}">${mode === "duree" ? "en répétitions" : "en secondes"}</button></div>`;
       h += `
-        <div class="lignes-series">${W.map((l) => ligne(l, true)).join("")}${L.map((l) => ligne(l, false)).join("")}</div>`;
+        <div class="lignes-series">${W.map((l) => ligne(l, true)).join("")}${L.map((l) => ligne(l, false)).join("")}</div>
+        <button class="lien petit grand-lien" data-grand>${ICONE_AGRANDIR} Grand format</button>`;
       h += `<div class="saisie">`;
       const ls = L.find((l) => l.k === ks);
       if (ls) h += `<div class="sous sel-titre">Série ${ks + 1} : combien tu aurais pu en faire de plus ?</div>
@@ -1351,6 +1356,8 @@ document.addEventListener("click", (ev) => {
   const s = seanceDuJour();
   if (t.dataset.fiche) {
     ouvrirFiche(t.dataset.fiche); return;
+  } else if (t.hasAttribute("data-grand")) {
+    ouvert = nom; ouvrirGrand(); return;
   } else if (t.dataset.soin) {
     ouvrirSoin(t.dataset.soin); return;
   } else if (t.dataset.superset) {
@@ -1772,6 +1779,7 @@ $("#toast").addEventListener("click", (ev) => {
 // mémorisé : la fois suivante reprend toujours la valeur fixée.
 // Après la dernière série d'un exercice, pas de compte à rebours : le changement de machine fait le
 // repos ; un bouton en propose un si besoin.
+const REPOS_TRANSITION = 120;   // entre deux exercices : le temps de changer de machine
 const reposDe = (nom) => {
   const ex = ctx?.exercices?.find((x) => x.nom === nom);
   if (mesureDe(nom) === "duree" || ex?.seance === "posture") return 30;
@@ -1790,9 +1798,14 @@ function lancerRepos(nom, quoi, cible, impose = null) {
   if (window.Notification?.permission === "default") Notification.requestPermission();   // une fois, au premier repos
 }
 function finExercice(nom) {
+  // En grand format, pas d'arrêt entre deux exercices : le repos de transition part tout seul et
+  // l'écran montre déjà le suivant (exoGrand). Le dernier de la séance garde son écran de fin.
+  if (grandVu && exosAffiches(seanceDuJour()).some((n) => n !== nom && resteSeries(n)))
+    return lancerRepos(nom, `${nom} : terminé ✓`, "", REPOS_TRANSITION);
   minu = { nom, quoi: `${nom} : terminé ✓`, cible: "Repos libre le temps de changer de machine", duree: 0, fin: 0, restant: null, mode: "fin" };
   garder();
-  setTimeout(() => { if (minu?.mode === "fin" && minu.nom === nom) arreterRepos(); }, 12000);
+  // En grand format, l'écran attend : il pose la question de la réserve et propose la suite.
+  setTimeout(() => { if (minu?.mode === "fin" && minu.nom === nom && !grandVu) arreterRepos(); }, 12000);
 }
 // Superset : pas de repos, on ouvre le partenaire et on enchaîne sa série. Le repos (120 s) viendra
 // après la série du partenaire. « Repos seul » débranche la paire pour la séance.
@@ -1801,8 +1814,13 @@ function enchainerSuperset(partner, selfNom) {
   ouvert = partner; sonne = false;
   garder();
 }
-function garder() { ecrire("carnet:minuteur", minu); clearInterval(tic); tic = setInterval(majRepos, 250); majRepos(); prevenirSW(); }
-function arreterRepos() { minu = null; localStorage.removeItem("carnet:minuteur"); clearInterval(tic); $("#minuteur").className = "minuteur"; prevenirSW(); }
+function garder() {
+  ecrire("carnet:minuteur", minu); clearInterval(tic);
+  tic = setInterval(() => { majRepos(); majGrand(); }, 250);
+  if (grandPref && minu) montrerGrand();   // le mode choisi reste : chaque repos s'ouvre en grand
+  majRepos(); majGrand(true); prevenirSW();
+}
+function arreterRepos() { minu = null; localStorage.removeItem("carnet:minuteur"); clearInterval(tic); $("#minuteur").className = "minuteur"; prevenirSW(); majGrand(true); }
 // La fin du repos en notification, pour qui passe sur une autre appli entre deux séries : la page en
 // arrière-plan ne sonne plus, le service worker si (Chrome le garde en vie jusqu'à 5 min). Sans serveur.
 // Chaque changement du minuteur (pause, ±15 s, Passer) remplace ou annule la fin annoncée.
@@ -1878,7 +1896,7 @@ function bip() {
   } catch {}
 }
 
-$("#minuteur").addEventListener("click", (ev) => {
+function clicMinuteur(ev) {
   const ef = ev.target.closest("[data-effort]");
   if (ef && minu?.effort) {
     const x = seanceDuJour().exos.find((e) => e.nom === minu.effort.nom)?.series?.[minu.effort.i];
@@ -1889,6 +1907,7 @@ $("#minuteur").addEventListener("click", (ev) => {
   const b = ev.target.closest("[data-min]");
   if (!b || !minu) return;
   const a = b.dataset.min;
+  if (a === "grand") return ouvrirGrand();
   if (a === "stop") return arreterRepos();
   if (a === "repos-seul") {   // débrancher le superset pour la séance et faire un repos normal
     const from = minu.ssFrom, partner = minu.nom;
@@ -1908,6 +1927,164 @@ $("#minuteur").addEventListener("click", (ev) => {
     if ((minu.restant ?? (minu.fin - Date.now()) / 1000) > 0) sonne = false;
   }
   garder();
+}
+$("#minuteur").addEventListener("click", clicMinuteur);
+
+// ═══════════════════════════════════════════ Grand format
+
+// Facultatif : tout le menu de série en plein écran, pour le lire et le toucher dans une fenêtre réduite,
+// le carnet à côté d'une autre appli. Il s'ouvre du minuteur ou d'une carte, et le reste de repos en
+// repos tant qu'on ne l'a pas refermé (grandPref). Toute la fenêtre sert de jauge : elle se remplit
+// pendant le repos et clignote en vert à la fin, visible du coin de l'œil. Les boutons sont ceux de
+// l'appli (data-pm, data-cocher, data-effort, data-min) : une série notée ici est une série comme une autre.
+// Quatre états : repos, fini (le repos est écoulé), serie (à faire, réglage et validation), fin (dernier exercice
+// de la séance). Entre deux exercices, pas d'arrêt : finExercice lance le repos et l'écran passe au suivant.
+const ICONE = (d) => `<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${d}"/></svg>`;
+const ICONE_AGRANDIR = ICONE("M9 3H3v6M15 3h6v6M9 21H3v-6M15 21h6v-6");
+const ICONE_REDUIRE = ICONE("M3 9h6V3M21 9h-6V3M3 15h6v6M21 15h-6v6");
+
+function montrerGrand() {
+  if (grandVu) return;
+  grandVu = true;
+  // Le geste « retour » du téléphone referme le grand format au lieu de quitter l'appli.
+  if (!history.state?.grand) history.pushState({ grand: 1 }, "");
+}
+function ouvrirGrand() {
+  grandPref = true; ecrire("carnet:grand", true);
+  montrerGrand(); ecranAllume(); majGrand(true);
+}
+function fermerGrand() {
+  grandPref = false; ecrire("carnet:grand", false); grandVu = false;
+  if (history.state?.grand) history.back();
+  dessiner();
+}
+addEventListener("popstate", () => {
+  if (grandVu && !history.state?.grand) { grandPref = false; ecrire("carnet:grand", false); grandVu = false; dessiner(); }
+});
+
+const resteSeries = (nom) => lignesDe(nom).L.some((l) => !l.fait);
+// L'exercice à faire ensuite : le partenaire d'un superset après le repos de la paire, sinon celui en
+// cours tant qu'il lui reste des séries, sinon le suivant de la séance. null : tout est fait.
+function exoGrand() {
+  if (minu?.mode === "superset") return minu.nom;
+  const liste = exosAffiches(seanceDuJour()), base = minu?.nom || ouvert;
+  const part = base && ssActif(base) ? partenaireSuperset(base) : null;
+  if (minu?.mode === "repos" && part && liste.includes(part) && resteSeries(part)) return part;
+  if (base && liste.includes(base) && resteSeries(base)) return base;
+  if (part && liste.includes(part) && resteSeries(part)) return part;
+  const i = liste.indexOf(base);
+  return [...liste.slice(i + 1), ...liste.slice(0, Math.max(0, i))].find(resteSeries) || null;
+}
+function etatGrand() {
+  if (!minu || minu.mode === "superset") return "serie";
+  if (minu.mode === "fin") return "fin";
+  return (minu.restant ?? (minu.fin - Date.now()) / 1000) > 0 ? "repos" : "fini";
+}
+// La prochaine série de l'exercice, échauffement d'abord.
+function aFaire(nom) {
+  const { L, W, k0, mode, pas } = lignesDe(nom), w = W.find((x) => !x.fait);
+  return { l: w || L.find((x) => x.k === k0), ech: !!w, mode, pas };
+}
+const cibleTxt = (nom) => { const { l, mode } = aFaire(nom); return !l ? "" : mode === "charge" ? `${kg(l.c)} kg × ${l.r}` : serieTxt(nom, l.c, l.r); };
+
+// Les − / + de la prochaine série : .ls et data-ligne les branchent sur les mêmes gestes que la carte.
+function reglageGrand(nom) {
+  const { l, ech, mode, pas } = aFaire(nom);
+  if (!l) return "";
+  const pm = (champ, val, unite, pasTxt) => `<div class="g-pm"><button data-pm="${champ}" data-d="-1" aria-label="moins ${pasTxt}">−</button>
+    <span class="g-val"><b>${val}</b><small>${unite}</small></span><button data-pm="${champ}" data-d="1" aria-label="plus ${pasTxt}">+</button></div>`;
+  return `<div class="ls g-ligne" data-ligne="${l.k}" data-nom="${esc(nom)}" ${ech ? 'data-ech="1"' : ""}>
+    ${mode === "charge" ? pm("c", kg(l.c), "kg", `${kg(pas)} kg`) : ""}${pm("r", l.r, mode === "duree" ? "s" : "rép.", mode === "duree" ? "5 secondes" : "une répétition")}</div>`;
+}
+
+function corpsGrand(etat) {
+  const reduire = `<button class="g-reduire" data-g="fermer" aria-label="Revenir à l'affichage normal">${ICONE_REDUIRE}</button>`;
+  const nom = exoGrand(), s = seanceDuJour();
+  const ef = minu?.effort, x = ef ? s.exos.find((e) => e.nom === ef.nom)?.series?.[ef.i] : null;
+  const zone = (avecReglage) => {
+    const reserve = x ? `<div class="g-reserve"><span>Combien tu aurais pu en faire de plus ?</span><div class="choix">${boutonsReserve("data-effort", x.e)}</div></div>` : "";
+    const reglage = avecReglage && nom ? reglageGrand(nom) : "";
+    return reserve || reglage ? `<div class="g-zone ${x && x.e == null ? "question" : ""}">${reserve}${reglage}</div>` : "";
+  };
+
+  if (etat === "serie") {
+    if (!nom) return `<div class="g-tete"><div class="g-titre"><b>Séance terminée</b></div>${reduire}</div>
+      <div class="g-milieu"><div class="g-bravo">✓</div></div>
+      <div class="g-actions"><button class="g-principal" data-g="fermer">Revenir au carnet</button></div>`;
+    const { L, n, k0 } = lignesDe(nom), { ech } = aFaire(nom);
+    const faites = L.filter((l) => l.fait).map((l) => `<span>${serieTxt(nom, l.c, l.r)}${l.e != null ? `<small>@${l.e === 4 ? "4+" : l.e}</small>` : ""}</span>`).join("");
+    const suite = exosAffiches(s).filter(resteSeries);
+    const ss = minu?.mode === "superset";
+    const fl = (g, c) => (suite.length > 1 && !ss ? `<button class="g-fleche" data-g="${g}" aria-label="${g === "prec" ? "Exercice précédent" : "Exercice suivant"}">${c}</button>` : "");
+    const mm = memo(nom);
+    return `<div class="g-tete">${fl("prec", "‹")}<div class="g-titre"><b>${esc(nom)}</b>
+        <span>${ss ? "⚡ superset, sans repos · " : ""}${ech ? "échauffement" : `série ${k0 + 1}/${Math.max(n, L.length)}`}${mm ? ` · ${esc(mm)}` : ""}</span></div>${fl("suiv", "›")}${reduire}</div>
+      <div class="g-milieu">${reglageGrand(nom)}${faites ? `<div class="g-faites">${faites}</div>` : ""}</div>
+      ${ss ? zone(false) : ""}
+      <div class="g-actions">${ss ? `<button class="g-second" data-min="repos-seul">Sans superset</button>` : ""}
+        <button class="g-principal" ${ech ? "data-cocher-ech" : "data-cocher"}>${ech ? "Échauffement fait" : "Série faite"}</button></div>`;
+  }
+  if (etat === "fin" && !nom) {
+    return `<div class="g-tete"><div class="g-titre"><b>${esc(minu.nom)}</b><span>dernier exercice de la séance</span></div>${reduire}</div>
+      <div class="g-milieu"><div class="g-bravo">✓</div></div>
+      ${zone(false)}
+      <div class="g-actions"><button class="g-principal" data-g="go">Terminer</button></div>`;
+  }
+  if (etat === "fin") {
+    return `<div class="g-tete"><div class="g-titre"><b>${esc(minu.nom)}</b><span>exercice terminé</span></div>${reduire}</div>
+      <div class="g-milieu"><div class="g-bravo">✓</div><div class="g-ensuite">Ensuite : <b>${esc(nom)}</b></div></div>
+      ${zone(false)}
+      <div class="g-actions g-trois"><button class="g-principal" data-min="repos2">Repos 2:00</button><button class="g-second" data-min="repos1">1:30</button>
+        <button class="g-second" data-g="go">Sans repos</button></div>`;
+  }
+  const memeExo = nom === minu.nom;
+  // L'exercice vient de finir : le titre annonce déjà le suivant, avec son réglage de machine.
+  const change = nom && !resteSeries(minu.nom);
+  const ensuite = !nom ? "Dernière série faite" : change ? `<span class="g-coche">✓</span> ${esc(minu.nom)} terminé`
+    : `Ensuite : ${memeExo ? "" : `${esc(nom)} · `}<b>${esc(cibleTxt(nom))}</b>`;
+  const etatRepos = etat === "fini" ? "repos terminé" : minu.restant != null ? "repos en pause" : "repos";
+  const sous = change ? [`exercice suivant · ${cibleTxt(nom)}`, memo(nom)].filter(Boolean).join(" · ") : etatRepos;
+  const tete = `<div class="g-tete"><div class="g-titre"><b>${esc(change ? nom : minu.nom)}</b><span>${esc(sous)}</span></div>${reduire}</div>
+    <div class="g-milieu"><div class="g-chrono" id="g-chrono"></div><div class="g-ensuite">${ensuite}</div>
+      ${change ? `<button class="g-lien" data-g="plus">+ une série de ${esc(minu.nom)}</button>` : ""}</div>`;
+  if (etat === "fini") return `${tete}${zone(false)}<div class="g-actions"><button class="g-go" data-g="go">Go</button></div>`;
+  return `${tete}${zone(true)}<div class="g-actions g-quatre">
+    <button class="g-second g-ajuste" data-min="-15">−15 s</button><button class="g-second" data-min="pause">${minu.restant != null ? "Reprendre" : "Pause"}</button>
+    <button class="g-second g-ajuste" data-min="15">+15 s</button><button class="g-second" data-g="go">Passer</button></div>`;
+}
+
+// Le chrono et la jauge bougent à chaque tic ; le reste n'est réécrit que s'il change (complet, ou
+// changement d'état) : réécrit quatre fois par seconde, un appui tombant entre deux se perdrait.
+function majGrand(complet = false) {
+  const el = $("#grand");
+  if (!grandVu) { if (el.className) { el.className = ""; grandEtat = ""; } return; }
+  const etat = etatGrand(), enRepos = minu?.mode === "repos";
+  const reste = enRepos ? minu.restant ?? (minu.fin - Date.now()) / 1000 : null;
+  const pause = minu?.restant != null;
+  const signe = `${etat} ${pause ? "pause" : ""}`;
+  if (complet || signe !== grandEtat) {
+    grandEtat = signe;
+    const html = corpsGrand(etat), c = $("#g-corps"), nom = exoGrand();
+    if (c.dataset.html !== html) { c.innerHTML = html; c.dataset.html = html; }
+    if (nom) c.dataset.exo = nom; else delete c.dataset.exo;
+  }
+  el.className = `ouvert ${signe} ${reste != null && reste > 0 && reste <= 10 ? "bientot" : ""} ${reste != null && reste < -90 ? "calme" : ""}`;
+  const v = Math.round(Math.abs(reste ?? 0)), ch = $("#g-chrono");
+  if (ch) ch.textContent = `${(reste ?? 0) < 0 ? "+" : ""}${Math.floor(v / 60)}:${String(v % 60).padStart(2, "0")}`;
+  $("#g-niveau").style.transform = `scaleY(${enRepos && minu.duree ? Math.max(0, Math.min(1, 1 - reste / minu.duree)) : 0})`;
+}
+
+$("#grand").addEventListener("click", (ev) => {
+  const g = ev.target.closest("[data-g]")?.dataset.g;
+  if (g === "fermer") return fermerGrand();
+  if (g === "go") { ouvert = exoGrand(); choisie = null; arreterRepos(); return dessiner(); }
+  if (g === "plus") { lignesDe(minu.nom).st.extra++; return dessiner(); }   // on reste sur l'exercice, le repos continue
+  if (g === "prec" || g === "suiv") {
+    const suite = exosAffiches(seanceDuJour()).filter(resteSeries), i = suite.indexOf(exoGrand());
+    ouvert = suite[(i + (g === "suiv" ? 1 : suite.length - 1)) % suite.length]; choisie = null;
+    return dessiner();
+  }
+  clicMinuteur(ev);
 });
 
 // L'écran reste allumé pendant la séance (sinon il se verrouille entre deux séries).
