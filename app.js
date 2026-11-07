@@ -564,7 +564,9 @@ function dessinerPage() {
   }
   h += `<div class="carte"><button class="case ${montre ? "faite" : ""}" data-montre><i>${montre ? "✓" : ""}</i>
     <span><b>Valider depuis la montre</b><span class="sous">à la fin de chaque repos, une notification « Série faite » que ta montre
-    relaie : la toucher note la série prévue et lance le repos. Les répétitions se corrigent ensuite ici.</span></span></button></div>`;
+    relaie : la toucher note la série prévue et lance le repos. Les répétitions se corrigent ensuite ici.</span></span></button>
+    ${montre ? `<div class="sous montre-journal">${journalMontre.length ? `Derniers échanges avec la montre :<br>${journalMontre.slice(-5).reverse()
+      .map((x) => `${new Date(x.t).toTimeString().slice(0, 8)} · ${esc(x.quoi)}`).join("<br>")}` : "Aucun appui reçu de la montre pour l'instant."}</div>` : ""}</div>`;
   // Épaule droite : la douleur du jour règle la réintroduction des exercices en pause.
   const dl = s.douleur;
   h += `<div class="carte"><b>Épaule droite</b> <span class="sous">douleur aujourd'hui, de 0 à 10</span>
@@ -1765,13 +1767,32 @@ function quandSerie(nom) {
   return aFaire(nom).ech ? "échauffement" : `série ${k0 + 1}/${Math.max(n, L.length)}`;
 }
 // « Série faite » touché sur la montre : la notification passe par le service worker, qui le transmet ici.
+// Il arrive aussi par la file d'attente du service worker (carnet endormi pendant l'appui) : chaque appui
+// porte l'id de la série visée, une série déjà notée ne l'est pas deux fois.
+const appuisTraites = new Set();
 function depuisMontre(d) {
-  if (!d?.nom || d.jour !== jour) return;
-  if (idSerie(d.nom) !== d.id) return toast("Montre : cette série était déjà notée");
+  if (!d?.nom || !d.id || appuisTraites.has(d.id)) return;   // reçu par message ET par la file : une fois
+  appuisTraites.add(d.id);
+  const accuser = (ok, texte) => navigator.serviceWorker?.controller?.postMessage({ accuse: d.id, ok, texte });
+  if (d.jour !== jour || idSerie(d.nom) !== d.id) { accuser(false, `déjà noté : ${d.nom}, ${d.quand}`); return; }
   ouvert = d.nom; choisie = null;
   if (aFaire(d.nom).ech) cocherEchauffement(d.nom); else validerSerie(d.nom);
   dessiner();
   toast(`Montre : ${d.nom}, série notée`);
+  const suite = minu?.mode === "repos" ? `repos ${Math.floor(minu.duree / 60)}:${String(minu.duree % 60).padStart(2, "0")}, la montre vibrera à la fin` : "enchaîne";
+  accuser(true, `${d.nom}, ${d.quand} notée · ${suite}`);
+}
+// Les appuis reçus pendant que le carnet dormait, et le journal des échanges (carte « Valider depuis la montre »).
+let journalMontre = [];
+async function relireMontre() {
+  try {
+    const c = await caches.open("carnet-montre"), r = await c.match("attente");
+    const attente = r ? await r.json() : [];
+    if (attente.length) { await c.put("attente", new Response("[]")); attente.forEach(depuisMontre); }
+    const j = await c.match("journal"), avant = journalMontre.length;
+    journalMontre = j ? await j.json() : [];
+    if (montre && journalMontre.length !== avant && onglet === "seance") dessiner();
+  } catch {}
 }
 
 function majRepos() {
@@ -2209,11 +2230,12 @@ majMini();
 // ───────────────────────────────────────── démarrage
 
 window.addEventListener("online", synchroniser);
-document.addEventListener("visibilitychange", () => { if (!document.hidden) { charger(); if (minu) { garder(); ecranAllume(); } } });
+document.addEventListener("visibilitychange", () => { if (!document.hidden) { charger(); relireMontre(); if (minu) { garder(); ecranAllume(); } } });
 if (minu) garder();
 if ("serviceWorker" in navigator) {
   navigator.serviceWorker.register("sw.js");
-  navigator.serviceWorker.addEventListener("message", (e) => { if (e.data?.montre) depuisMontre(e.data.montre); });
+  navigator.serviceWorker.addEventListener("message", (e) => { if (e.data?.montre) { depuisMontre(e.data.montre); relireMontre(); } });
+  relireMontre(); addEventListener("focus", relireMontre);
   // Une nouvelle version prend la main : la page se recharge pour l'afficher tout de suite (tout est déjà
   // enregistré sur le téléphone, minuteur compris). Pas au premier lancement, où il n'y avait rien avant.
   const avait = !!navigator.serviceWorker.controller;

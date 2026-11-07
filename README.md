@@ -83,6 +83,9 @@ service worker) pour noter ses séries au téléphone, à la salle, même sans r
   montre (Garmin, Android) la relaie ; le bouton passe par le service worker (`notificationclick`), qui prévient la page
   (`depuisMontre`) ou la rouvre (`#montre=`). Une série déjà notée au téléphone n'est pas notée deux fois (`idSerie`). En
   superset, la notification part tout de suite pour le partenaire ; la dernière série d'un exercice enchaîne sur le suivant.
+  Le carnet endormi (téléphone en veille) ne reçoit le message qu'au réveil : l'appui est gardé en file (cache `carnet-montre`), relu
+  à chaque retour au premier plan ; sans accusé de réception sous 2 s, le service worker ramène le carnet au premier plan. Une
+  notification « ✓ Série notée » confirme sur la montre, et le journal des échanges s'affiche sous le réglage.
 - **Série ratée** : sous la cible, la question de la réserve dit « 4 sur 6 » et 0 devient « échec ». Sous la cible, la charge
   reste et la série la plus faible vise +1, quelle que soit la raison ; la réserve dit si c'était l'échec ou un arrêt avant.
 - **Rapport sport** (onglet Santé, depuis le 2026-11-05) : le rapport que Claude écrit chaque dimanche sur le PC

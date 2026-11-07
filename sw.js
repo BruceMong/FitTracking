@@ -1,6 +1,6 @@
 // Hors ligne : l'appli elle-même vient du cache (la salle capte mal), les appels à la base
 // passent toujours par le réseau — les séances en attente sont gardées par app.js.
-const VERSION = "fittracking-v37";
+const VERSION = "fittracking-v38";
 const FICHIERS = ["./", "index.html", "app.js", "fiches.js", "pictos.js", "corps.js", "manifest.webmanifest", "icon.svg", "icon-192.png", "icon-512.png"];
 // Les photos des fiches d'exercice (~1 Mo), en cache dès l'installation : la salle capte mal.
 const IMAGES = [
@@ -146,7 +146,7 @@ self.addEventListener("install", (e) => {
 
 self.addEventListener("activate", (e) => {
   e.waitUntil(caches.keys()
-    .then((ks) => Promise.all(ks.filter((k) => k !== VERSION).map((k) => caches.delete(k))))
+    .then((ks) => Promise.all(ks.filter((k) => k !== VERSION && k !== MONTRE).map((k) => caches.delete(k))))
     .then(() => self.clients.claim()));
 });
 
@@ -166,7 +166,26 @@ self.addEventListener("fetch", (e) => {
 // Fin du repos (envoyée par la page à chaque changement du minuteur) : notifiée si le carnet n'est pas à
 // l'écran, sinon la page sonne elle-même. Une nouvelle fin, ou une fin nulle, remplace l'attente en cours.
 let attente = null;
+// ─── Montre : l'appui sur « Série faite », de la notification au carnet.
+// Le carnet endormi (téléphone en veille) ne reçoit un message qu'au réveil : l'appui est donc aussi gardé
+// en attente (cache MONTRE), que la page relit à chaque retour au premier plan. La page accuse réception ;
+// sans réponse sous 2 s, le service worker ramène le carnet au premier plan pour le réveiller. Chaque étape
+// va dans un journal, affiché dans la carte « Valider depuis la montre » : c'est ce qui dit, si rien ne se
+// passe, où ça s'est arrêté (appui jamais reçu = la montre ou Garmin ; reçu mais pas noté = le carnet).
+const MONTRE = "carnet-montre";
+const lireMontre = async (cle) => { const r = await (await caches.open(MONTRE)).match(cle); return r ? r.json() : []; };
+const ecrireMontre = async (cle, v) => (await caches.open(MONTRE)).put(cle, new Response(JSON.stringify(v)));
+const journal = async (quoi) => ecrireMontre("journal", [...(await lireMontre("journal")), { t: Date.now(), quoi }].slice(-12));
+const accuses = new Map();   // id de série → résout l'attente d'accusé de réception
+
 self.addEventListener("message", (e) => {
+  if (e.data?.accuse) {   // la page a traité l'appui : confirmation sur la montre
+    accuses.get(e.data.accuse)?.();
+    e.waitUntil(Promise.all([journal(e.data.texte || "noté par le carnet"),
+      e.data.ok ? self.registration.showNotification("✓ Série notée", { body: e.data.texte || "", tag: "repos", renotify: true,
+        icon: "icon-192.png", vibrate: [120] }) : null]));
+    return;
+  }
   if (!e.data || !("repos" in e.data)) return;
   attente?.annuler();
   attente = null;
@@ -198,8 +217,17 @@ self.addEventListener("notificationclick", (e) => {
   e.notification.close();
   const d = e.notification.data;
   if (e.action === "serie" && d) {
-    e.waitUntil(self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((cs) =>
-      cs.length ? cs.forEach((c) => c.postMessage({ montre: d })) : self.clients.openWindow(`./#montre=${encodeURIComponent(JSON.stringify(d))}`)));
+    e.waitUntil((async () => {
+      await journal(`appui reçu : ${d.nom}, ${d.quand}`);
+      await ecrireMontre("attente", [...(await lireMontre("attente")).filter((x) => x.id !== d.id), d]);
+      const cs = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
+      if (!cs.length) { await journal("carnet fermé : rouvert"); return self.clients.openWindow(`./#montre=${encodeURIComponent(JSON.stringify(d))}`); }
+      const recu = new Promise((ok) => { accuses.set(d.id, () => ok(true)); setTimeout(() => ok(false), 2000); });
+      cs.forEach((c) => c.postMessage({ montre: d }));
+      if (await recu) return;
+      await journal("carnet endormi : ramené au premier plan");
+      try { await cs[0].focus(); } catch { await self.clients.openWindow("./"); }
+    })().finally(() => accuses.delete(d.id)));
     return;
   }
   e.waitUntil(self.clients.matchAll({ type: "window" }).then((cs) => (cs[0] ? cs[0].focus() : self.clients.openWindow("./"))));
