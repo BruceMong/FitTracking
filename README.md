@@ -78,6 +78,13 @@ service worker) pour noter ses séries au téléphone, à la salle, même sans r
   l'exercice, et ‹ › en choisit un autre si la machine est prise. Il réutilise les boutons de l'appli : une série
   notée ici est une série comme une autre. Les tailles suivent la fenêtre, et les paliers de hauteur (620, 430, 340, 300, 240 px)
   retirent le secondaire. Tester : jamais sur le port 9333 (ZapZap) ni 9222 (Chrome de Bruce).
+- **Montre** (réglage « Valider depuis la montre », onglet Séance, depuis le 2026-11-07) : à la fin de chaque repos, la
+  notification devient « Go · exercice », la série prévue et un bouton **Série faite**, envoyée même carnet à l'écran. La
+  montre (Garmin, Android) la relaie ; le bouton passe par le service worker (`notificationclick`), qui prévient la page
+  (`depuisMontre`) ou la rouvre (`#montre=`). Une série déjà notée au téléphone n'est pas notée deux fois (`idSerie`). En
+  superset, la notification part tout de suite pour le partenaire ; la dernière série d'un exercice enchaîne sur le suivant.
+- **Série ratée** : sous la cible, la question de la réserve dit « 4 sur 6 » et 0 devient « échec ». Sous la cible, la charge
+  reste et la série la plus faible vise +1, quelle que soit la raison ; la réserve dit si c'était l'échec ou un arrêt avant.
 - **Rapport sport** (onglet Santé, depuis le 2026-11-05) : le rapport que Claude écrit chaque dimanche sur le PC
   (`sante-rapport`), poussé dans le contexte (`ctx.rapports`, les 12 derniers, en markdown). La carte montre « En bref »
   et les indicateurs face au rapport d'avant ; « Lire le rapport » déplie le reste ; les dates ouvrent les précédents.

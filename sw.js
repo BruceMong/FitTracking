@@ -1,6 +1,6 @@
 // Hors ligne : l'appli elle-même vient du cache (la salle capte mal), les appels à la base
 // passent toujours par le réseau — les séances en attente sont gardées par app.js.
-const VERSION = "fittracking-v36";
+const VERSION = "fittracking-v37";
 const FICHIERS = ["./", "index.html", "app.js", "fiches.js", "pictos.js", "corps.js", "manifest.webmanifest", "icon.svg", "icon-192.png", "icon-512.png"];
 // Les photos des fiches d'exercice (~1 Mo), en cache dès l'installation : la salle capte mal.
 const IMAGES = [
@@ -181,15 +181,26 @@ self.addEventListener("message", (e) => {
     if (attente === moi) attente = null;
     if (!sonner) return;
     const pages = await self.clients.matchAll({ type: "window" });
-    if (pages.some((c) => c.visibilityState === "visible")) return;
-    await self.registration.showNotification("Repos fini", {
-      body: e.data.quoi || "", tag: "repos", renotify: true, icon: "icon-192.png", vibrate: [300, 150, 300, 150, 300],
+    // « toujours » (réglage Montre) : même carnet à l'écran, pour que la montre vibre et porte le bouton.
+    if (!e.data.toujours && pages.some((c) => c.visibilityState === "visible")) return;
+    const s = e.data.serie;
+    await self.registration.showNotification(s ? `Go · ${s.nom}` : "Repos fini", {
+      body: s ? `${s.quand} · ${s.txt}` : e.data.quoi || "", tag: "repos", renotify: true, icon: "icon-192.png",
+      vibrate: [300, 150, 300, 150, 300], data: s || null,
+      actions: s ? [{ action: "serie", title: s.ech ? "Échauffement fait" : "Série faite" }] : [],
     });
   }));
 });
 
-// Toucher la notification ramène au carnet.
+// Toucher la notification ramène au carnet. Son bouton « Série faite » (sur le téléphone, ou relayé par la
+// montre) part à la page, qui note la série ; carnet fermé, il le rouvre avec la série dans l'adresse.
 self.addEventListener("notificationclick", (e) => {
   e.notification.close();
+  const d = e.notification.data;
+  if (e.action === "serie" && d) {
+    e.waitUntil(self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((cs) =>
+      cs.length ? cs.forEach((c) => c.postMessage({ montre: d })) : self.clients.openWindow(`./#montre=${encodeURIComponent(JSON.stringify(d))}`)));
+    return;
+  }
   e.waitUntil(self.clients.matchAll({ type: "window" }).then((cs) => (cs[0] ? cs[0].focus() : self.clients.openWindow("./"))));
 });

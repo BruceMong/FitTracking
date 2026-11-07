@@ -53,6 +53,8 @@ async function api(fonction, params = {}) {
 let ctx = lire("carnet:ctx");                  // contexte poussé par le PC
 // Grand format (voir plus bas) : grandPref survit d'une séance à l'autre, grandVu dit s'il est à l'écran.
 let grandPref = lire("carnet:grand", false), grandVu = false, grandEtat = "";
+// Montre : à la fin de chaque repos, une notification « Série faite » que la montre (Garmin) relaie.
+let montre = lire("carnet:montre", false);
 let distantes = lire("carnet:seances", []);    // séances des 90 derniers jours, vues du serveur
 const jour = aujourdhui();
 let doc = lire(`carnet:seance:${jour}`)?.doc || null;
@@ -560,6 +562,9 @@ function dessinerPage() {
       <div class="motifs">${MOTIFS.map((m) => `<button data-excuse="${m}" class="${ex?.tag === m ? "choisi" : ""}">${m}</button>`).join("")}</div>
       ${ex ? `<input id="excuse-texte" value="${esc(ex.texte || "")}" placeholder="Un mot (facultatif) : grippe, déplacement…">` : ""}</div>`;
   }
+  h += `<div class="carte"><button class="case ${montre ? "faite" : ""}" data-montre><i>${montre ? "✓" : ""}</i>
+    <span><b>Valider depuis la montre</b><span class="sous">à la fin de chaque repos, une notification « Série faite » que ta montre
+    relaie : la toucher note la série prévue et lance le repos. Les répétitions se corrigent ensuite ici.</span></span></button></div>`;
   // Épaule droite : la douleur du jour règle la réintroduction des exercices en pause.
   const dl = s.douleur;
   h += `<div class="carte"><b>Épaule droite</b> <span class="sous">douleur aujourd'hui, de 0 à 10</span>
@@ -1241,6 +1246,62 @@ function sante() {
 
 // ───────────────────────────────────────── les gestes
 
+// Un échauffement fait (bouton de la carte, grand format ou montre) : repos court, sans réserve.
+function cocherEchauffement(nom) {
+  const s = seanceDuJour();
+  // Un échauffement fait : un repos court (1 min), sans réserve à noter.
+  const { W, st } = lignesDe(nom), l = W.find((x) => !x.fait);
+  if (!l) return;
+  let e = s.exos.find((x) => x.nom === nom);
+  if (!e) { e = { nom, series: [] }; s.exos.push(e); }
+  (e.ech ||= []).push({ c: l.c, r: l.r, t: new Date().toTimeString().slice(0, 8) });
+  st.ech = Math.max(0, st.ech - 1); delete st.echEdits[l.k];
+  if (s.excuse) s.excuse = null;
+  navigator.vibrate?.(30);
+  sauver();
+  const suiv = lignesDe(nom).W.find((x) => !x.fait) || lignesDe(nom).L.find((x) => !x.fait);
+  lancerRepos(nom, `${nom} · échauffement fait`, suiv ? `${kg(suiv.c)} kg × ${suiv.r}` : "", 60);
+}
+
+// La prochaine série de l'exercice, faite : depuis la carte, le grand format ou la montre.
+function validerSerie(nom) {
+  const s = seanceDuJour();
+  const { L, k0, n, st, der, ci } = lignesDe(nom), l = L.find((x) => x.k === k0);
+  if (!l) return;
+  let e = s.exos.find((x) => x.nom === nom);
+  if (!e) { e = { nom, series: [] }; s.exos.push(e); }
+  if (e.series.length >= n) st.extra = Math.max(0, st.extra - 1);   // une série ajoutée en plus est faite
+  const mode = mesureDe(nom);
+  // Sans charge : c = 0 ; une tenue porte u = "s" (le PC l'écrit « 45 s » dans seances.md).
+  e.series.push({ c: mode === "charge" ? l.c : 0, r: l.r, ...(mode === "duree" ? { u: "s" } : {}), t: new Date().toTimeString().slice(0, 8) });
+  delete st.edits[k0];
+  if (s.excuse) s.excuse = null;   // finalement, séance : le jour n'est plus excusé
+  choisie = null; ouvert = nom;
+  navigator.vibrate?.(30);
+  sauver();
+  // Superset : si le partenaire est encore en retard, on enchaîne sans repos ; sinon repos de 120 s
+  // après la paire. « Repos seul » (ssOff) débranche la paire pour la séance (machine occupée).
+  const part = partenaireSuperset(nom), ssOn = ssActif(nom);
+  const pExo = part ? s.exos.find((x) => x.nom === part) : null;
+  if (ssOn) { e.ss = clefSuperset(nom, part); if (pExo) pExo.ss = e.ss; }
+  const selfFini = e.series.length >= n && !L.some((x) => x.k > k0);
+  const partFini = pExo ? pExo.series.length >= schemaDe(part).series : false;
+  if (ssOn && !partFini && (pExo?.series.length || 0) < e.series.length) {
+    enchainerSuperset(part, nom);
+  } else if (selfFini && (!ssOn || partFini)) {
+    finExercice(nom);
+  } else if (ssOn) {
+    lancerRepos(nom, "Superset · repos", `${nom} ↔ ${part}`, 120);
+  } else {
+    const suiv = L.find((x) => x.k === k0 + 1);
+    lancerRepos(nom, `${nom} · série ${e.series.length + 1}/${Math.max(n, L.length)} ensuite`, suiv ? (mode === "charge" ? `${kg(suiv.c)} kg × ${suiv.r}` : serieTxt(nom, suiv.c, suiv.r)) : "");
+  }
+  // La réserve se note pendant le repos, pour les séries avec charge seulement : une tenue ou un
+  // exercice de posture n'ont pas d'« échec » à approcher.
+  // `vise` : les répétitions de la cible, pour que la question dise « 4 sur 6 » quand la série est ratée.
+  if (mode === "charge") { minu.effort = { nom, i: e.series.length - 1, vise: ci?.r ?? schemaDe(nom).reps }; garder(); }
+}
+
 let sansClic = 0;   // après un glissement sur une série, le clic qui suit ne la sélectionne pas
 document.addEventListener("click", (ev) => {
   if (Date.now() - sansClic < 450) return;
@@ -1305,6 +1366,11 @@ document.addEventListener("click", (ev) => {
     if (x) { const k = Number(t.dataset.reserve); if (x.e === k) delete x.e; else x.e = k; sauver(); }
   } else if (t.dataset.periode) {
     periode = Number(t.dataset.periode); ecrire("carnet:periode", periode);
+  } else if (t.hasAttribute("data-montre")) {
+    montre = !montre; ecrire("carnet:montre", montre);
+    if (montre && window.Notification?.permission === "default") Notification.requestPermission();
+    toast(montre ? "Montre : la notification de fin de repos portera « Série faite »" : "Montre : désactivée");
+    prevenirSW();
   } else if (t.dataset.douleur != null) {
     const v = Number(t.dataset.douleur);
     s.douleur = s.douleur === v ? null : v; sauver();
@@ -1334,18 +1400,7 @@ document.addEventListener("click", (ev) => {
     const k = Number(t.closest(".ls").dataset.ligne);
     choisie = choisie?.[0] === nom && choisie[1] === k ? null : [nom, k];
   } else if (t.hasAttribute("data-cocher-ech")) {
-    // Un échauffement fait : un repos court (1 min), sans réserve à noter.
-    const { W, st } = lignesDe(nom), l = W.find((x) => !x.fait);
-    if (!l) return;
-    let e = s.exos.find((x) => x.nom === nom);
-    if (!e) { e = { nom, series: [] }; s.exos.push(e); }
-    (e.ech ||= []).push({ c: l.c, r: l.r, t: new Date().toTimeString().slice(0, 8) });
-    st.ech = Math.max(0, st.ech - 1); delete st.echEdits[l.k];
-    if (s.excuse) s.excuse = null;
-    navigator.vibrate?.(30);
-    sauver();
-    const suiv = lignesDe(nom).W.find((x) => !x.fait) || lignesDe(nom).L.find((x) => !x.fait);
-    lancerRepos(nom, `${nom} · échauffement fait`, suiv ? `${kg(suiv.c)} kg × ${suiv.r}` : "", 60);
+    cocherEchauffement(nom);
   } else if (t.hasAttribute("data-serie-retirer")) {
     // Une série sans charge (posture, tenue) n'a pas de réserve à toucher, donc pas de « Retirer » : son ×.
     retirerSerie(nom, Number(t.closest(".ls").dataset.ligne));
@@ -1371,39 +1426,7 @@ document.addEventListener("click", (ev) => {
     s.excuse = s.excuse?.tag === t.dataset.excuse ? null : { tag: t.dataset.excuse, texte: s.excuse?.texte || "" };
     sauver();
   } else if (t.hasAttribute("data-valider") || t.hasAttribute("data-cocher")) {
-    const { L, k0, n, st, der, ci } = lignesDe(nom), l = L.find((x) => x.k === k0);
-    if (!l) return;
-    let e = s.exos.find((x) => x.nom === nom);
-    if (!e) { e = { nom, series: [] }; s.exos.push(e); }
-    if (e.series.length >= n) st.extra = Math.max(0, st.extra - 1);   // une série ajoutée en plus est faite
-    const mode = mesureDe(nom);
-    // Sans charge : c = 0 ; une tenue porte u = "s" (le PC l'écrit « 45 s » dans seances.md).
-    e.series.push({ c: mode === "charge" ? l.c : 0, r: l.r, ...(mode === "duree" ? { u: "s" } : {}), t: new Date().toTimeString().slice(0, 8) });
-    delete st.edits[k0];
-    if (s.excuse) s.excuse = null;   // finalement, séance : le jour n'est plus excusé
-    choisie = null; ouvert = nom;
-    navigator.vibrate?.(30);
-    sauver();
-    // Superset : si le partenaire est encore en retard, on enchaîne sans repos ; sinon repos de 120 s
-    // après la paire. « Repos seul » (ssOff) débranche la paire pour la séance (machine occupée).
-    const part = partenaireSuperset(nom), ssOn = ssActif(nom);
-    const pExo = part ? s.exos.find((x) => x.nom === part) : null;
-    if (ssOn) { e.ss = clefSuperset(nom, part); if (pExo) pExo.ss = e.ss; }
-    const selfFini = e.series.length >= n && !L.some((x) => x.k > k0);
-    const partFini = pExo ? pExo.series.length >= schemaDe(part).series : false;
-    if (ssOn && !partFini && (pExo?.series.length || 0) < e.series.length) {
-      enchainerSuperset(part, nom);
-    } else if (selfFini && (!ssOn || partFini)) {
-      finExercice(nom);
-    } else if (ssOn) {
-      lancerRepos(nom, "Superset · repos", `${nom} ↔ ${part}`, 120);
-    } else {
-      const suiv = L.find((x) => x.k === k0 + 1);
-      lancerRepos(nom, `${nom} · série ${e.series.length + 1}/${Math.max(n, L.length)} ensuite`, suiv ? (mode === "charge" ? `${kg(suiv.c)} kg × ${suiv.r}` : serieTxt(nom, suiv.c, suiv.r)) : "");
-    }
-    // La réserve se note pendant le repos, pour les séries avec charge seulement : une tenue ou un
-    // exercice de posture n'ont pas d'« échec » à approcher.
-    if (mode === "charge") { minu.effort = { nom, i: e.series.length - 1 }; garder(); }
+    validerSerie(nom);
   } else if (t.dataset.ligne != null) {
     // Une puce de carte fermée l'ouvre ; dans une carte ouverte, la ligne se règle par ses boutons.
     const nm = t.dataset.nom;
@@ -1697,7 +1720,7 @@ function lancerRepos(nom, quoi, cible, impose = null) {
 function finExercice(nom) {
   // En grand format, pas d'arrêt entre deux exercices : le repos de transition part tout seul et
   // l'écran montre déjà le suivant (exoGrand). Le dernier de la séance garde son écran de fin.
-  if (grandVu && exosAffiches(seanceDuJour()).some((n) => n !== nom && resteSeries(n)))
+  if ((grandVu || montre) && exosAffiches(seanceDuJour()).some((n) => n !== nom && resteSeries(n)))
     return lancerRepos(nom, `${nom} : terminé ✓`, "", REPOS_TRANSITION);
   minu = { nom, quoi: `${nom} : terminé ✓`, cible: "Repos libre le temps de changer de machine", duree: 0, fin: 0, restant: null, mode: "fin" };
   garder();
@@ -1722,8 +1745,33 @@ function arreterRepos() { minu = null; localStorage.removeItem("carnet:minuteur"
 // arrière-plan ne sonne plus, le service worker si (Chrome le garde en vie jusqu'à 5 min). Sans serveur.
 // Chaque changement du minuteur (pause, ±15 s, Passer) remplace ou annule la fin annoncée.
 function prevenirSW() {
-  const fin = minu?.mode === "repos" && minu.restant == null && minu.fin > Date.now() ? minu.fin : null;
-  navigator.serviceWorker?.controller?.postMessage({ repos: fin, quoi: [minu?.quoi, minu?.cible].filter(Boolean).join(" · ") });
+  const repos = minu?.mode === "repos" && minu.restant == null && minu.fin > Date.now();
+  // Montre : la notification porte la série à faire et un bouton « Série faite ». En superset, pas de
+  // repos entre les deux : elle part tout de suite, pour enchaîner le partenaire depuis la montre.
+  const ss = montre && minu?.mode === "superset";
+  const nom = montre && (repos || ss) ? exoGrand() : null;
+  const serie = nom ? { nom, jour, id: idSerie(nom), ech: aFaire(nom).ech, txt: cibleTxt(nom), quand: quandSerie(nom) } : null;
+  navigator.serviceWorker?.controller?.postMessage({ repos: repos ? minu.fin : ss && serie ? Date.now() : null,
+    quoi: [minu?.quoi, minu?.cible].filter(Boolean).join(" · "), serie, toujours: montre });
+}
+// Ce qui identifie la prochaine série d'un exercice : si elle a déjà été notée au téléphone, le bouton
+// de la montre, venu trop tard, ne la note pas une seconde fois.
+function idSerie(nom) {
+  const { e, k0 } = lignesDe(nom);
+  return `${jour}|${nom}|${aFaire(nom).ech ? `e${e?.ech?.length || 0}` : k0}`;
+}
+function quandSerie(nom) {
+  const { L, n, k0 } = lignesDe(nom);
+  return aFaire(nom).ech ? "échauffement" : `série ${k0 + 1}/${Math.max(n, L.length)}`;
+}
+// « Série faite » touché sur la montre : la notification passe par le service worker, qui le transmet ici.
+function depuisMontre(d) {
+  if (!d?.nom || d.jour !== jour) return;
+  if (idSerie(d.nom) !== d.id) return toast("Montre : cette série était déjà notée");
+  ouvert = d.nom; choisie = null;
+  if (aFaire(d.nom).ech) cocherEchauffement(d.nom); else validerSerie(d.nom);
+  dessiner();
+  toast(`Montre : ${d.nom}, série notée`);
 }
 
 function majRepos() {
@@ -1764,17 +1812,25 @@ function majRepos() {
 }
 
 // Les cinq boutons de la réserve (0 à 4+), le chiffre en gros et un repère sous les deux bouts.
-const boutonsReserve = (attr, choisi) => [0, 1, 2, 3, 4].map((k) =>
+const boutonsReserve = (attr, choisi, rate = false) => [0, 1, 2, 3, 4].map((k) =>
   `<button ${attr}="${k}" class="${choisi === k ? "choisi" : ""}" aria-label="${k === 4 ? "4 ou plus" : k} en réserve"><b>${k === 4 ? "4+" : k}</b>${
-    k === 0 ? "<small>à fond</small>" : k === 4 ? "<small>facile</small>" : "<small>&nbsp;</small>"}</button>`).join("");
+    k === 0 ? `<small>${rate ? "échec" : "à fond"}</small>` : k === 4 ? "<small>facile</small>" : "<small>&nbsp;</small>"}</button>`).join("");
+// La question de la réserve. Sous la cible, elle le dit : « 4 sur 6 », et 0 devient « échec ». Une série
+// ratée n'est jamais lue comme un choix : sous la cible, la charge reste et la série la plus faible vise +1
+// (cible, ici et au PC) ; la réserve dit en plus si c'était l'échec (0) ou un arrêt avant (1 et plus).
+function questionReserve(x, ef) {
+  const rate = ef?.vise && x.r < ef.vise;
+  return { rate, texte: rate ? `${x.r} sur ${ef.vise} : tu étais à l'échec, ou il en restait ?` : "Combien tu aurais pu en faire de plus ?" };
+}
 
 function majEffort() {
   // « Combien tu aurais pu en faire de plus ? » (la réserve) sous le minuteur, pour la série qui vient d'être faite. Facultatif :
   // la réserve affine la cible et la récupération ; sans réponse, la série compte comme difficile.
   const el = $("#min-effort"), ef = minu?.effort;
   const x = ef ? seanceDuJour().exos.find((e) => e.nom === ef.nom)?.series?.[ef.i] : null;
-  const html = x ? `<span class="q">Série faite : combien tu aurais pu en faire de plus ?</span>
-    <div class="choix">${boutonsReserve("data-effort", x.e)}</div>` : "";
+  const qr = x ? questionReserve(x, ef) : null;
+  const html = x ? `<span class="q">${qr.rate ? qr.texte : `Série faite : ${qr.texte.charAt(0).toLowerCase() + qr.texte.slice(1)}`}</span>
+    <div class="choix">${boutonsReserve("data-effort", x.e, qr.rate)}</div>` : "";
   if (el.dataset.html !== html) { el.innerHTML = html; el.dataset.html = html; }
 }
 
@@ -1899,7 +1955,8 @@ function corpsGrand(etat) {
   const nom = exoGrand(), s = seanceDuJour();
   const ef = minu?.effort, x = ef ? s.exos.find((e) => e.nom === ef.nom)?.series?.[ef.i] : null;
   const zone = (avecReglage) => {
-    const reserve = x ? `<div class="g-reserve"><span>Combien tu aurais pu en faire de plus ?</span><div class="choix">${boutonsReserve("data-effort", x.e)}</div></div>` : "";
+    const qr = x ? questionReserve(x, ef) : null;
+    const reserve = x ? `<div class="g-reserve"><span>${qr.texte}</span><div class="choix">${boutonsReserve("data-effort", x.e, qr.rate)}</div></div>` : "";
     const reglage = avecReglage && nom ? reglageGrand(nom) : "";
     return reserve || reglage ? `<div class="g-zone ${x && x.e == null ? "question" : ""}">${reserve}${reglage}</div>` : "";
   };
@@ -2156,11 +2213,15 @@ document.addEventListener("visibilitychange", () => { if (!document.hidden) { ch
 if (minu) garder();
 if ("serviceWorker" in navigator) {
   navigator.serviceWorker.register("sw.js");
+  navigator.serviceWorker.addEventListener("message", (e) => { if (e.data?.montre) depuisMontre(e.data.montre); });
   // Une nouvelle version prend la main : la page se recharge pour l'afficher tout de suite (tout est déjà
   // enregistré sur le téléphone, minuteur compris). Pas au premier lancement, où il n'y avait rien avant.
   const avait = !!navigator.serviceWorker.controller;
   navigator.serviceWorker.addEventListener("controllerchange", () => { if (avait) location.reload(); });
 }
+// Carnet fermé quand on a touché « Série faite » sur la montre : le service worker l'a rouvert avec la série.
+{ const m = location.hash.match(/^#montre=(.+)$/);
+  if (m) { history.replaceState(null, "", location.pathname); try { depuisMontre(JSON.parse(decodeURIComponent(m[1]))); } catch {} } }
 // Le numéro de version, en bas de page : pour vérifier que le téléphone a bien la dernière.
 caches?.keys?.().then((ks) => { const v = ks.find((k) => k.startsWith("fittracking-")); if (v) $("#version").textContent = `FitTracking ${v.slice(12)}`; }).catch(() => {});
 dessiner();
