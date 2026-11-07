@@ -521,7 +521,7 @@ function dessinerPage() {
           : suivante ? `<button class="ls-ok" ${ech ? "data-cocher-ech" : "data-cocher"} aria-label="Valider ${ech ? "l'échauffement" : `la série ${l.k + 1}`}"></button>`
           : `<span class="ls-ok vide"></span>`;
         const res = ech ? (l.fait ? `<button class="ls-e" data-ech-retirer aria-label="Retirer l'échauffement">×</button>` : `<span></span>`)
-          : mode !== "charge" ? `<span></span>`
+          : mode !== "charge" ? (l.fait ? `<button class="ls-e" data-serie-retirer aria-label="Retirer la série ${l.k + 1}">×</button>` : `<span></span>`)
           : l.fait ? `<button class="ls-e ${l.e != null ? "note" : ""}" data-res aria-label="Réserve">${l.e != null ? `@${l.e === 4 ? "4+" : l.e}` : "@?"}</button>` : `<span></span>`;
         return `<div class="ls ${cls} ${ech ? "ech" : ""} ${!ech && l.k === ks ? "sel" : ""}" data-ligne="${l.k}" data-nom="${esc(nom)}" ${ech ? 'data-ech="1"' : ""}>
           <span class="ls-n">${ech ? "é" : l.k + 1}</span>
@@ -1346,6 +1346,9 @@ document.addEventListener("click", (ev) => {
     sauver();
     const suiv = lignesDe(nom).W.find((x) => !x.fait) || lignesDe(nom).L.find((x) => !x.fait);
     lancerRepos(nom, `${nom} · échauffement fait`, suiv ? `${kg(suiv.c)} kg × ${suiv.r}` : "", 60);
+  } else if (t.hasAttribute("data-serie-retirer")) {
+    // Une série sans charge (posture, tenue) n'a pas de réserve à toucher, donc pas de « Retirer » : son ×.
+    retirerSerie(nom, Number(t.closest(".ls").dataset.ligne));
   } else if (t.hasAttribute("data-ech-retirer")) {
     const k = Number(t.closest(".ls").dataset.ligne), e = s.exos.find((x) => x.nom === nom);
     if (!e?.ech?.[k]) return;
