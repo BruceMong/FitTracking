@@ -12,6 +12,7 @@
 import { FICHES, SOINS } from "./fiches.js";
 import { pictosDe } from "./pictos.js";
 import { CORPS } from "./corps.js";
+import { clePlan } from "./montre.js";
 
 const URL_API = "https://vesdcipjplvgdwfsvefq.supabase.co/rest/v1/rpc/";
 const PUBLIQUE = "sb_publishable_6sYHfOdCG9m-xAkfm8Zcwg_7F4ZKu2c";
@@ -374,7 +375,7 @@ async function synchroniser() {
   if (change || relancer) { relancer = false; return synchroniser(); }
   if (lire("carnet:photos", []).length) envoyerPhotos();
   if (reste) { etat("attente", navigator.onLine ? "réessai…" : "hors ligne · gardé ici"); setTimeout(synchroniser, 30000); }
-  else etat("ok", "enregistré ✓");
+  else { etat("ok", "enregistré ✓"); publierPlan(); }   // rien en attente : le plan suit la séance
 }
 
 async function charger() {
@@ -398,6 +399,7 @@ async function charger() {
   }
   synchroniser();
   dessiner();
+  publierPlan(true);
 }
 
 function etat(classe, texte) {
@@ -1841,6 +1843,63 @@ async function relireMontre() {
     journalMontre = j ? await j.json() : [];
     if (montre && JSON.stringify(journalMontre) !== avant && onglet === "seance") dessiner();
   } catch {}
+}
+
+// ───────────────────────────────────────── appli montre
+
+// Le plan du jour pour l'appli de la montre : les séries qui restent, dans l'ordre exact où le grand format
+// les enchaînerait, avec le repos qui suit chacune. Calculé en « faisant » chaque série sur une copie de
+// l'état (noterSerie + suiteApres, les mêmes décisions que validerSerie), puis l'état est remis tel quel :
+// ni enregistrement, ni repos, ni vibration, ni message.
+// { jour, v, etapes: [{ id, nom, quoi, txt, repos, ech, k, c, r, u }] } ; v = doc.maj de la séance (ou null).
+function planMontre() {
+  const garde = { doc, saisie, minu, ouvert, choisie }, copie = (x) => JSON.parse(JSON.stringify(x ?? null));
+  try {
+    // La copie d'abord : seanceDuJour() crée la séance ou change son type (« repos ») en place.
+    doc = copie(doc); seanceDuJour(); saisie = copie(saisie) || {}; minu = copie(minu); choisie = null;
+    const etapes = [];
+    for (let nom = exoGrand(), i = 0; nom && i < 100; nom = exoGrand(), i++) {
+      const { l, ech, mode } = aFaire(nom);
+      const etape = { id: idSerie(nom), nom, quoi: quandSerie(nom) + (!ech && ssActif(nom) ? " · superset" : ""),
+                      txt: cibleTxt(nom), repos: 0, ech,
+                      k: ech ? (doc.exos.find((x) => x.nom === nom)?.ech?.length || 0) : l.k,
+                      c: mode === "charge" ? l.c : 0, r: l.r, u: mode === "duree" ? "s" : null };
+      // Après chaque geste, le type que sauver() recalculerait : une séance « autre » devient push dès sa
+      // première série d'un exercice push, et exosAffiches (donc la suite) en dépend.
+      if (ech) { noterEchauffement(nom); doc.type = typeReel(doc); etape.repos = 60; minu = { nom, mode: "repos" }; }
+      else {
+        const note = noterSerie(nom);
+        doc.type = typeReel(doc);
+        const s = suiteApres(nom, note);
+        if (s.quoi === "superset") { minu = { nom: s.part, mode: "superset" }; ouvert = s.part; }
+        else { etape.repos = s.quoi === "fin" ? (s.autre ? REPOS_TRANSITION : 0) : s.duree; minu = { nom, mode: "repos" }; }
+      }
+      etapes.push(etape);
+    }
+    if (etapes.length) etapes.at(-1).repos = 0;
+    return { jour, v: garde.doc?.maj ?? null, etapes };
+  } finally { ({ doc, saisie, minu, ouvert, choisie } = garde); }
+}
+
+// Publie le plan pour la montre (base : carnet_montre_publier). Seulement s'il a changé depuis la dernière
+// publication réussie (clePlan ignore v), sauf `force` : après charger(), le dernier appareil réveillé fait
+// foi. Une publication à la fois : un appel pendant un envoi est rejoué une fois à la fin, sans forcer (le
+// plan vient de partir, la comparaison suffit). Un échec ne retient rien : on réessaiera au prochain appel.
+let publication = false, republier = false;
+async function publierPlan(force = false) {
+  if (!cle) return;
+  if (publication) { republier = true; return; }
+  publication = true;
+  try {
+    const plan = planMontre(), k = clePlan(plan);
+    if (force || k !== lire("carnet:montre-publie")) {
+      await api("carnet_montre_publier", { p_plan: plan });
+      ecrire("carnet:montre-publie", k);
+    }
+  } catch (e) {
+    console.warn("plan montre non publié", e.message);
+  } finally { publication = false; }
+  if (republier) { republier = false; return publierPlan(); }
 }
 
 function majRepos() {
