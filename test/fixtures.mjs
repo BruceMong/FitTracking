@@ -30,3 +30,10 @@ export const enCours = (series, plus = {}) => ({
     sale: false,
   },
 });
+
+// Un appui de l'appli montre tel que le relit carnet_montre_appuis : la série k du développé couché, faite à
+// 16:58 (heure de Paris), suivie du repos de l'étape (150 s).
+export const appui = (k, plus = {}) => ({
+  id: `2026-11-09|${DC}|${k}`, nom: DC, jour: "2026-11-09", quand: `série ${k + 1}/4`, ech: false, k, c: 42.5, r: 6,
+  t: "16:58:00", ts: Date.parse("2026-11-09T16:58:00+01:00") / 1000, repos: 150, ...plus,
+});

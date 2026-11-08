@@ -12,7 +12,7 @@
 import { FICHES, SOINS } from "./fiches.js";
 import { pictosDe } from "./pictos.js";
 import { CORPS } from "./corps.js";
-import { clePlan } from "./montre.js";
+import { verdictAppui, noterAppui, finReposAppui, clePlan } from "./montre.js";
 
 const URL_API = "https://vesdcipjplvgdwfsvefq.supabase.co/rest/v1/rpc/";
 const PUBLIQUE = "sb_publishable_6sYHfOdCG9m-xAkfm8Zcwg_7F4ZKu2c";
@@ -399,9 +399,10 @@ async function charger() {
     if (e.code === "28000") { cle = null; localStorage.removeItem("carnet:cle"); }
     etat("attente", "hors ligne");
   }
-  synchroniser();
-  dessiner();
-  publierPlan(true);
+  reveil++;
+  synchroniser(); dessiner();
+  // Les appuis de l'appli montre d'abord : le plan publié (forcé) les a déjà retirés.
+  integrerAppuis().then(() => publierPlan(true));
 }
 
 function etat(classe, texte) {
@@ -1808,8 +1809,9 @@ function arreterRepos() { minu = null; localStorage.removeItem("carnet:minuteur"
 // La fin du repos en notification, pour qui passe sur une autre appli entre deux séries : la page en
 // arrière-plan ne sonne plus, le service worker si (Chrome le garde en vie jusqu'à 5 min). Sans serveur.
 // Chaque changement du minuteur (pause, ±15 s, Passer) remplace ou annule la fin annoncée.
+// Un repos lancé par l'appli montre (minu.appli) n'en annonce aucune : la montre a déjà vibré à la fin.
 function prevenirSW() {
-  const repos = minu?.mode === "repos" && minu.restant == null && minu.fin > Date.now();
+  const repos = minu?.mode === "repos" && !minu.appli && minu.restant == null && minu.fin > Date.now();
   // Montre : la notification porte la série à faire et un bouton « Série faite ». En superset, pas de
   // repos entre les deux : elle part tout de suite, pour enchaîner le partenaire depuis la montre.
   const ss = montre && minu?.mode === "superset";
@@ -1895,27 +1897,127 @@ function planMontre() {
 
 // Publie le plan pour la montre (base : carnet_montre_publier). Seulement s'il a changé depuis la dernière
 // publication réussie (clePlan ignore v), sauf `force` : après charger(), le dernier appareil réveillé fait
-// foi. Une publication à la fois : un appel pendant un envoi est rejoué une fois à la fin, sans forcer (le
-// plan vient de partir, la comparaison suffit). Un échec ne retient rien : on réessaiera au prochain appel.
-let publication = false, republier = false, minuPublication = 0;
+// foi, et le plan part au moins une fois par réveil (`reveil`, compté par charger) ; s'il vient de partir
+// depuis ce réveil (par synchroniser), la comparaison suffit. Une publication à la fois : un appel pendant un
+// envoi est rejoué une fois à la fin (forcé si l'un des appels l'était). Un échec ne retient rien : on
+// réessaiera au prochain appel.
+let publication = false, republier = false, reforcer = false, minuPublication = 0, reveil = 0, publieAuReveil = -1;
 function programmerPublication() {
   clearTimeout(minuPublication);
   minuPublication = setTimeout(publierPlan, 1500);
 }
 async function publierPlan(force = false) {
   if (!cle) return;
-  if (publication) { republier = true; return; }
+  if (publication) { republier = true; reforcer ||= force; return; }
   publication = true;
   try {
-    const plan = planMontre(), k = clePlan(plan);
-    if (force || k !== lire("carnet:montre-publie")) {
+    const plan = planMontre(), k = clePlan(plan), r = reveil;
+    if ((force && publieAuReveil !== r) || k !== lire("carnet:montre-publie")) {
       await api("carnet_montre_publier", { p_plan: plan });
-      ecrire("carnet:montre-publie", k);
+      ecrire("carnet:montre-publie", k); publieAuReveil = r;
     }
   } catch (e) {
     console.warn("plan montre non publié", e.message);
   } finally { publication = false; }
-  if (republier) { republier = false; return publierPlan(); }
+  if (republier) { const f = reforcer; republier = reforcer = false; return publierPlan(f); }
+}
+
+// Les appuis de l'appli montre (base : carnet_montre_appuis), relus depuis le dernier id lu
+// (carnet:montre-appui, simple raccourci : la garde est dans la séance) et appliqués dans l'ordre. La série
+// notée est celle de l'appui (c, r, u, à l'heure t), pas celle que le carnet recalculerait : c'est ce qui a été
+// fait. Une intégration à la fois : un appel pendant une intégration rend celle en cours, sans rien relancer.
+let integration = null;
+function integrerAppuis() {
+  if (!cle) return Promise.resolve();
+  return integration ||= (async () => {
+    try {
+      const xs = await api("carnet_montre_appuis", { p_depuis: lire("carnet:montre-appui", 0) }) || [];
+      if (!xs.length) return;
+      const autres = new Map();   // jour → séance d'un autre jour qui a reçu une série
+      let notees = 0, deja = 0, duJour = null;
+      for (const x of xs) {
+        const v = appliquerAppui(x.appui, autres);
+        ecrire("carnet:montre-appui", x.id);
+        if (v === "noter") { notees++; if (x.appui.jour === jour) duJour = x.appui; }
+        if (v === "deja-note") deja++;
+      }
+      if (duJour) sauver();
+      if (autres.size) synchroniser();
+      if (duJour) reposDepuisAppli(duJour);
+      if (notees || deja) toast(`Montre : ${notees ? `${notees} ${notees > 1 ? "séries notées" : "série notée"}` : "aucune série notée"}`
+        + (deja ? ` · ${deja} déjà ${deja > 1 ? "notées" : "notée"} au téléphone` : ""));
+      dessiner();
+    } catch (e) {
+      console.warn("appuis montre non lus", e.message);
+    } finally { integration = null; }
+  })();
+}
+
+// Un appui appliqué à la séance de son jour ; rend le verdict de la garde ("noter" s'il a été noté). La séance
+// d'un autre jour (carnet ouvert le lendemain) vient du téléphone, sinon du serveur, sinon est créée ; elle
+// est gardée dans `autres` le temps de l'intégration et écrite « à envoyer ». Pas de repos pour elle.
+function appliquerAppui(a, autres = new Map()) {
+  const quoi = `${a?.nom}, ${a?.quand}`;
+  // Illisible : sans id, nom ou rang ; ou un jour, une charge, des répétitions qui ne se notent pas.
+  if (verdictAppui(null, a) === "invalide" || !/^\d{4}-\d{2}-\d{2}$/.test(a.jour) || !Number.isFinite(a.c) || !Number.isFinite(a.r)) {
+    journaliserMontre("appli montre : appui illisible"); return "invalide";
+  }
+  const auJour = a.jour === jour, k = `carnet:seance:${a.jour}`;
+  let d = auJour ? seanceDuJour() : autres.get(a.jour);
+  if (!d) {
+    const dist = distantes.find((s) => s.jour === a.jour);
+    d = lire(k)?.doc || (dist ? JSON.parse(JSON.stringify(dist)) : { jour: a.jour, type: "autre", exos: [], note: "" });
+    if (d.type === "repos") d.type = "autre";   // comme seanceDuJour : une série notée en fait une séance
+  }
+  const v = verdictAppui(d, a);
+  if (v === "doublon") journaliserMontre(`appli montre : déjà intégré : ${quoi}`);
+  if (v === "deja-note") journaliserMontre(`appli montre : déjà noté : ${quoi}`);
+  if (v !== "noter") return v;
+  if (auJour) {
+    // La saisie suit, comme après validerSerie / cocherEchauffement : la ligne prévue est consommée.
+    const { e, n, st } = lignesDe(a.nom);
+    if (a.ech) { st.ech = Math.max(0, st.ech - 1); delete st.echEdits[a.k]; }
+    else {
+      if ((e?.series.length || 0) >= n) st.extra = Math.max(0, st.extra - 1);   // une série en plus est faite
+      delete st.edits[a.k];
+    }
+  }
+  noterAppui(d, a);
+  if (auJour && !a.ech && ssActif(a.nom)) {
+    const part = partenaireSuperset(a.nom), e = d.exos.find((x) => x.nom === a.nom), pExo = d.exos.find((x) => x.nom === part);
+    e.ss = clefSuperset(a.nom, part); if (pExo) pExo.ss = e.ss;
+  }
+  if (!auJour) {
+    d.type = typeReel(d); d.maj = new Date().toISOString();
+    autres.set(a.jour, d); ecrire(k, { doc: d, sale: true });
+  }
+  journaliserMontre(`appli montre : ${quoi} notée`);
+  return v;
+}
+
+// Le repos du téléphone calé sur celui de la montre (fin = ts + repos) ; déjà passé, ou sans repos : aucun.
+// minu.appli : pas de fin annoncée au service worker (prevenirSW), la montre vibre elle-même.
+function reposDepuisAppli(a) {
+  ouvert = a.nom;
+  const fin = finReposAppui(a, Date.now());
+  if (!fin) { if (minu) arreterRepos(); return; }
+  minu = { nom: a.nom, quoi: `Montre · ${a.nom}`, cible: "repos lancé par la montre", duree: a.repos, fin, restant: null,
+           mode: "repos", impose: true, appli: true };
+  sonne = false; garder();
+}
+
+// Une ligne du journal de la carte « Valider depuis la montre » (même format que sw.js : 12 dernières). Les
+// écritures passent l'une après l'autre : plusieurs appuis d'une intégration ne s'écrasent pas.
+let fileJournal = Promise.resolve();
+function journaliserMontre(quoi) {
+  return fileJournal = fileJournal.then(async () => {
+    try {
+      const c = await caches.open("carnet-montre"), j = await c.match("journal");
+      const l = j ? await j.json() : [];
+      await c.put("journal", new Response(JSON.stringify([...l, { t: Date.now(), quoi }].slice(-12))));
+    } catch {}
+    return relireMontre();
+  });
 }
 
 function majRepos() {
@@ -2358,7 +2460,7 @@ if (minu) garder();
 if ("serviceWorker" in navigator) {
   navigator.serviceWorker.register("sw.js");
   navigator.serviceWorker.addEventListener("message", (e) => { if (e.data?.montre) depuisMontre(e.data.montre); if (e.data?.montre || e.data?.journal) relireMontre(); });
-  relireMontre(); addEventListener("focus", relireMontre);
+  relireMontre(); addEventListener("focus", () => { relireMontre(); integrerAppuis(); });
   // Une nouvelle version prend la main : la page se recharge pour l'afficher tout de suite (tout est déjà
   // enregistré sur le téléphone, minuteur compris). Pas au premier lancement, où il n'y avait rien avant.
   const avait = !!navigator.serviceWorker.controller;
