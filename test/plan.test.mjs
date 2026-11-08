@@ -136,3 +136,24 @@ test("publication refusée : rien de retenu, on réessaie au prochain synchronis
   assert.equal(n(), avant + 1);
   assert.ok(b.stockage()["carnet:montre-publie"]);
 });
+
+test("changer d'exercice au téléphone (« suiv » du grand format) republie le plan, qui part de cet exercice", async () => {
+  const b = await chargerCarnet({ stockage: avecCtx({ "carnet:cle": "cle-essai" }) });
+  await b.attendre(); b.evaluer("dessiner()"); b.lancerMinuteurs(); await b.attendre();
+  const pubs = () => b.appels.filter((x) => x.fonction === "carnet_montre_publier");
+  const avant = pubs().length;
+  // Le geste « suiv » du grand format (écouteur de #grand), tel quel.
+  b.evaluer(`grandVu = true; { const suite = exosAffiches(seanceDuJour()).filter(resteSeries), i = suite.indexOf(exoGrand());
+    ouvert = suite[(i + 1) % suite.length]; choisie = null; dessiner(); }`);
+  for (let i = 0; i < 3; i++) { b.lancerMinuteurs(); await b.attendre(); }
+  assert.equal(b.json("exoGrand()"), TRI);
+  assert.equal(pubs().length, avant + 1);
+  assert.equal(pubs().at(-1).corps.p_plan.etapes[0].nom, TRI);
+});
+
+test("planMontre : une série que noterSerie ne note pas arrête le plan au lieu de lever", async () => {
+  // Inatteignable aujourd'hui (aFaire lit la même ligne et la trouve) : noterSerie remplacé pour l'essai.
+  const b = await chargerCarnet({ stockage: avecCtx() });
+  b.evaluer("noterSerie = () => null");
+  assert.deepEqual(b.json("planMontre().etapes"), []);
+});

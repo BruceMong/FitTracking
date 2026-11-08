@@ -185,3 +185,76 @@ test("lecture du serveur ratée, aucune séance du jour ici : l'appui du jour at
   assert.equal(b.stockage()["carnet:montre-appui"], undefined);
   assert.equal(b.stockage()["carnet:seance:2026-11-09"]?.sale ?? false, false);
 });
+
+// ── Après un appui, le carnet reprend là où le grand format en serait : superset compris, et sans toucher à un
+// repos lancé au téléphone après l'appui.
+const pousse = (plus = []) => ({ "carnet:seance:2026-11-09": { doc: { jour: JOUR, type: "push",
+  exos: [{ nom: DC, series: [0, 1, 2, 3].map(() => ({ c: 42.5, r: 6, t: "16:00:00" })) }, ...plus], note: "" }, sale: false } });
+const apS = (nom, k, repos, t = "16:58:00") => ({ id: `${JOUR}|${nom}|${k}`, nom, jour: JOUR, quand: `série ${k + 1}/3`, ech: false, k,
+  c: nom === TRI ? 20 : 8, r: nom === TRI ? 12 : 9, t, ts: Date.parse(`${JOUR}T${t}+01:00`) / 1000, repos });
+const planDe = (p) => p.etapes.map((e) => `${e.id.split("|").slice(1).join("|")}/${e.repos}`);
+const publie = (b) => b.appels.filter((x) => x.fonction === "carnet_montre_publier").at(-1).corps.p_plan;
+// Le grand format du téléphone, la même série validée pour de vrai : le plan qu'il proposerait ensuite.
+const auGrand = async (stockage, nom) => {
+  const g = await chargerCarnet({ stockage: avecCtx(stockage) });
+  g.evaluer(`grandVu = true; validerSerie(${q(nom)})`);
+  return g.json("planMontre()");
+};
+
+test("superset : appui TRI sans repos (le partenaire enchaîne), le plan publié repart du partenaire", async () => {
+  const b = await banc(pousse(), [apS(TRI, 0, 0)]); await fin(b);
+  const attendu = planDe(await auGrand(pousse(), TRI));
+  assert.equal(attendu[0], `${ELE}|0/120`);
+  assert.deepEqual(planDe(b.json("planMontre()")), attendu);
+  assert.deepEqual(planDe(publie(b)), attendu);
+});
+test("superset : appui ELE dont le repos de la paire est déjà passé, le plan repart de TRI", async () => {
+  const tri = [{ nom: TRI, series: [{ c: 20, r: 12, t: "16:50:00" }] }];
+  const b = await banc(pousse(tri), [apS(ELE, 0, 120, "16:50:30")]); await fin(b);
+  assert.equal(b.json("minu"), null);
+  const attendu = planDe(await auGrand(pousse(tri), ELE));
+  assert.equal(attendu[0], `${TRI}|1/0`);
+  assert.deepEqual(planDe(b.json("planMontre()")), attendu);
+  assert.deepEqual(planDe(publie(b)), attendu);
+});
+test("une série validée au téléphone après l'appui garde son repos et sa notification", async () => {
+  const etat = { appuis: [] };
+  const b = await chargerCarnet({ stockage: avecCtx({ "carnet:cle": "cle-essai" }),
+    reponses: { carnet_montre_appuis: () => liste(...etat.appuis) } });
+  await b.attendre();
+  b.evaluer(`validerSerie(${q(DC)})`);   // 17:00, après l'appui de 16:58 que la base n'a pas encore rendu
+  const repos = b.json("minu");
+  etat.appuis = [apS(TRI, 0, 150)];        // repos de la montre jusqu'à 17:00:30, encore en cours
+  await b.evaluer("integrerAppuis()"); await b.attendre();
+  assert.equal(b.json(`seanceDuJour().exos.find((e) => e.nom === ${q(TRI)}).series.length`), 1);
+  assert.deepEqual(b.json("minu"), repos);
+  assert.equal(b.json("ouvert"), DC);
+  assert.equal(b.messagesSW.at(-1).repos, repos.fin);
+});
+
+// ── Une panne en cours d'intégration ne perd rien : ce qui a été appliqué est sauvé, le curseur s'y arrête.
+test("exception au 2e appui : le 1er est sauvé, le curseur reste sur le 1er", async () => {
+  const etat = { appuis: [] };
+  const b = await chargerCarnet({ stockage: avecCtx({ "carnet:cle": "cle-essai" }),
+    reponses: { carnet_montre_appuis: () => liste(...etat.appuis) } });
+  await b.attendre();
+  b.evaluer(`{ const vrai = noterAppui; let n = 0;
+    noterAppui = (d, a) => { if (++n === 2) throw new Error("panne d'essai"); return vrai(d, a); }; }`);
+  etat.appuis = [appui(0), appui(1)];
+  await b.evaluer("integrerAppuis()"); await b.attendre();
+  const s = b.stockage()["carnet:seance:2026-11-09"];
+  assert.equal(s?.doc.exos[0].series.length, 1);
+  assert.equal(s.sale, true);
+  assert.equal(b.stockage()["carnet:montre-appui"], 7);
+});
+
+// ── Un appui illisible se voit dans le toast, pas seulement dans le journal (affiché avec le réglage montre).
+const dernierToast = (b) => b.evaluer(`$("#toast").innerHTML`);
+test("appui illisible compté dans le toast", async () => {
+  const b = await banc({}, [appui(0), appui(1, { r: null })]); await b.attendre();
+  assert.match(dernierToast(b), /Montre : 1 série notée · 1 appui illisible/);
+});
+test("appuis illisibles seuls : le toast le dit aussi", async () => {
+  const b = await banc({}, [appui(0, { c: "x" }), appui(1, { r: null })]); await b.attendre();
+  assert.match(dernierToast(b), /Montre : aucune série notée · 2 appuis illisibles/);
+});

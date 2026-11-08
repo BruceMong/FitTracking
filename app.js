@@ -117,7 +117,7 @@ const clefSuperset = (a, b) => [a, b].sort().join(" + ");
 const SS_OFF = `carnet:ss-off:${jour}`;
 const ssOff = new Set(lire(SS_OFF, []));
 // Valeurs vues au dernier dessiner() : la saisie et les paires coupées changent le plan de la montre.
-let saisieVue = JSON.stringify(saisie), ssOffVu = JSON.stringify([...ssOff]);
+let saisieVue = JSON.stringify(saisie), ssOffVu = JSON.stringify([...ssOff]), exoGrandVu;
 try { for (const k of Object.keys(localStorage)) if ((k.startsWith("carnet:ss-off:") && k !== SS_OFF) || (k.startsWith("carnet:saisie:") && k !== `carnet:saisie:${jour}`)) localStorage.removeItem(k); } catch {}
 const ssActif = (nom) => { const p = partenaireSuperset(nom); return !!p && !ssOff.has(clefSuperset(nom, p)); };
 function couperSuperset(a, b, off) {
@@ -437,12 +437,15 @@ function exosAffiches(d) {
 }
 
 function dessiner() {
-  // Point commun à tous les gestes : la saisie du jour est gardée, et un changement (saisie ou paire de
-  // superset coupée) republie le plan pour la montre 1,5 s plus tard.
+  // Point commun à tous les gestes : la saisie du jour est gardée, et un changement (saisie, paire de
+  // superset coupée, exercice proposé ensuite : « suiv », « go », une carte ouverte) republie le plan pour
+  // la montre 1,5 s plus tard.
+  // La saisie est écrite avant exoGrand(), dont les lignesDe y ajoutent les entrées par défaut.
   const s = JSON.stringify(saisie), o = JSON.stringify([...ssOff]);
-  if (s !== saisieVue || o !== ssOffVu) {
-    if (s !== saisieVue) ecrire(`carnet:saisie:${jour}`, saisie);
-    saisieVue = s; ssOffVu = o;
+  if (s !== saisieVue) ecrire(`carnet:saisie:${jour}`, saisie);
+  const g = exoGrand();
+  if (s !== saisieVue || o !== ssOffVu || g !== exoGrandVu) {
+    saisieVue = s; ssOffVu = o; exoGrandVu = g;
     programmerPublication();
   }
   dessinerPage(); majGrand(true);
@@ -1778,7 +1781,7 @@ const reposDe = (nom) => {
   if (mesureDe(nom) === "duree" || ex?.seance === "posture") return 30;
   return (schemaDe(nom).reps ?? 8) <= 6 ? 150 : 90;
 };
-let minu = lire("carnet:minuteur");   // {nom, quoi, cible, duree, fin, restant (si en pause), mode}
+let minu = lire("carnet:minuteur");   // {nom, quoi, cible, duree, fin, restant (si en pause), mode, debut}
 let tic = null, sonne = false;
 // Les boutons ne sont réécrits que s'ils changent : réécrits à chaque tic (4 fois par seconde),
 // un appui tombant entre deux réécritures se perdait.
@@ -1786,7 +1789,7 @@ function boutons(html) { const b = $("#min-boutons"); if (b.dataset.html !== htm
 
 function lancerRepos(nom, quoi, cible, impose = null) {
   const duree = impose ?? reposDe(nom);
-  minu = { nom, quoi, cible, duree, fin: Date.now() + duree * 1000, restant: null, mode: "repos", impose: impose != null };
+  minu = { nom, quoi, cible, duree, fin: Date.now() + duree * 1000, restant: null, mode: "repos", impose: impose != null, debut: Date.now() };
   sonne = false; garder(); ecranAllume();
   if (window.Notification?.permission === "default") Notification.requestPermission();   // une fois, au premier repos
 }
@@ -1795,7 +1798,7 @@ function finExercice(nom) {
   // l'écran montre déjà le suivant (exoGrand). Le dernier de la séance garde son écran de fin.
   if ((grandVu || montre) && exosAffiches(seanceDuJour()).some((n) => n !== nom && resteSeries(n)))
     return lancerRepos(nom, `${nom} : terminé ✓`, "", REPOS_TRANSITION);
-  minu = { nom, quoi: `${nom} : terminé ✓`, cible: "Repos libre le temps de changer de machine", duree: 0, fin: 0, restant: null, mode: "fin" };
+  minu = { nom, quoi: `${nom} : terminé ✓`, cible: "Repos libre le temps de changer de machine", duree: 0, fin: 0, restant: null, mode: "fin", debut: Date.now() };
   garder();
   // En grand format, l'écran attend : il pose la question de la réserve et propose la suite.
   setTimeout(() => { if (minu?.mode === "fin" && minu.nom === nom && !grandVu) arreterRepos(); }, 12000);
@@ -1803,7 +1806,7 @@ function finExercice(nom) {
 // Superset : pas de repos, on ouvre le partenaire et on enchaîne sa série. Le repos (120 s) viendra
 // après la série du partenaire. « Repos seul » débranche la paire pour la séance.
 function enchainerSuperset(partner, selfNom) {
-  minu = { nom: partner, quoi: `Superset — enchaîne : ${partner}`, cible: "sans repos", duree: 0, fin: 0, restant: null, mode: "superset", ssFrom: selfNom };
+  minu = { nom: partner, quoi: `Superset — enchaîne : ${partner}`, cible: "sans repos", duree: 0, fin: 0, restant: null, mode: "superset", ssFrom: selfNom, debut: Date.now() };
   ouvert = partner; sonne = false;
   garder();
 }
@@ -1891,6 +1894,7 @@ function planMontre() {
       if (ech) { noterEchauffement(nom); doc.type = typeReel(doc); etape.repos = 60; minu = { nom, mode: "repos" }; }
       else {
         const note = noterSerie(nom);
+        if (!note) break;
         doc.type = typeReel(doc);
         const s = suiteApres(nom, note);
         if (s.quoi === "superset") { minu = { nom: s.part, mode: "superset" }; ouvert = s.part; }
@@ -1948,19 +1952,26 @@ function integrerAppuis() {
       if (!xs.length) return;
       await apresLecture();   // une lecture partie avant ou pendant la relève : on l'attend
       const autres = new Map();   // jour → séance d'un autre jour qui a reçu une série
-      let notees = 0, deja = 0, duJour = null, arret = false;
-      for (const x of xs) {
-        const v = appliquerAppui(x.appui, autres);
-        if (v === "attente") arret = true;
-        if (!arret) ecrire("carnet:montre-appui", x.id);
-        if (v === "noter") { notees++; if (x.appui.jour === jour) duJour = x.appui; }
-        if (v === "deja-note") deja++;
+      let notees = 0, deja = 0, illisibles = 0, duJour = null, arret = false;
+      // Une panne au milieu (appliquerAppui qui lève) ne perd rien : ce qui a été appliqué est sauvé (et
+      // envoyé), et le curseur, écrit après chaque appui appliqué, s'arrête au dernier.
+      try {
+        for (const x of xs) {
+          const v = appliquerAppui(x.appui, autres);
+          if (v === "attente") arret = true;
+          if (!arret) ecrire("carnet:montre-appui", x.id);
+          if (v === "noter") { notees++; if (x.appui.jour === jour) duJour = x.appui; }
+          if (v === "deja-note") deja++;
+          if (v === "invalide") illisibles++;
+        }
+      } finally {
+        if (duJour) sauver();
+        if (autres.size) synchroniser();
       }
-      if (duJour) sauver();
-      if (autres.size) synchroniser();
       if (duJour) reposDepuisAppli(duJour);
-      if (notees || deja) toast(`Montre : ${notees ? `${notees} ${notees > 1 ? "séries notées" : "série notée"}` : "aucune série notée"}`
-        + (deja ? ` · ${deja} déjà ${deja > 1 ? "notées" : "notée"} au téléphone` : ""));
+      if (notees || deja || illisibles) toast(`Montre : ${notees ? `${notees} ${notees > 1 ? "séries notées" : "série notée"}` : "aucune série notée"}`
+        + (deja ? ` · ${deja} déjà ${deja > 1 ? "notées" : "notée"} au téléphone` : "")
+        + (illisibles ? ` · ${illisibles} ${illisibles > 1 ? "appuis illisibles" : "appui illisible"}` : ""));
       dessiner();
     } catch (e) {
       console.warn("appuis montre non lus", e.message);
@@ -2027,10 +2038,19 @@ function appliquerAppui(a, autres = new Map()) {
 
 // Le repos du téléphone calé sur celui de la montre (fin = ts + repos) ; déjà passé, ou sans repos : aucun.
 // minu.appli : pas de fin annoncée au service worker (prevenirSW), la montre vibre elle-même.
+// Un minuteur lancé au téléphone après l'appui (debut, ou fin − durée pour un minuteur gardé d'avant) est plus
+// récent : il reste tel quel, avec sa notification. Sans repos en cours, l'exercice ouvert est celui que le
+// grand format proposerait à la fin du repos de l'appui (le partenaire d'un superset, comme le bouton « go »).
 function reposDepuisAppli(a) {
+  if (minu && !minu.appli && (minu.debut ?? minu.fin - minu.duree * 1000) > a.ts * 1000) return;
   ouvert = a.nom;
   const fin = finReposAppui(a, Date.now());
-  if (!fin) { if (minu) arreterRepos(); return; }
+  if (!fin) {
+    const avant = minu;
+    minu = { nom: a.nom, mode: "repos" }; ouvert = exoGrand(); minu = avant;
+    if (minu) arreterRepos();
+    return;
+  }
   minu = { nom: a.nom, quoi: `Montre · ${a.nom}`, cible: "repos lancé par la montre", duree: a.repos, fin, restant: null,
            mode: "repos", impose: true, appli: true };
   sonne = false; garder();
@@ -2144,7 +2164,7 @@ function clicMinuteur(ev) {
     return lancerRepos(from || partner, `${from || partner} · repos`, "");
   }
   if (a === "repos2" || a === "repos1") {
-    minu = { ...minu, mode: "repos", quoi: `Repos avant l'exercice suivant`, cible: "", duree: a === "repos2" ? 120 : 90 };
+    minu = { ...minu, mode: "repos", quoi: `Repos avant l'exercice suivant`, cible: "", duree: a === "repos2" ? 120 : 90, debut: Date.now() };
     minu.fin = Date.now() + minu.duree * 1000; sonne = false;
   } else if (a === "pause") {
     if (minu.restant != null) { minu.fin = Date.now() + minu.restant * 1000; minu.restant = null; }
