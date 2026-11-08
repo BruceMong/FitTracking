@@ -1,6 +1,6 @@
 -- Migration « montre » : tables montre_plan et montre_appuis, clé de la montre et sa vérification,
 -- et les quatre fonctions RPC carnet_montre_*.
--- Écrite le 2026-11-09. Appliquée en production le : (à remplir à l'application).
+-- Écrite le 2026-11-09. Appliquée en production le : 2026-11-09 (accord de Bruce).
 -- Rejouable : create ... if not exists, create or replace.
 
 create schema if not exists private;
