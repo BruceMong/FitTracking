@@ -60,7 +60,7 @@ let distantes = lire("carnet:seances", []);    // séances des 90 derniers jours
 const jour = aujourdhui();
 let doc = lire(`carnet:seance:${jour}`)?.doc || null;
 let ouvert = null;                            // exercice dont la saisie est dépliée
-let saisie = {};                              // nom → {edits: {ligne: {c, r}}, extra} : lignes prévues réglées à la main
+let saisie = lire(`carnet:saisie:${jour}`, {});  // nom → {edits: {ligne: {c, r}}, extra} : lignes prévues réglées à la main
 let memoEdite = null;                         // exercice dont le mémo est en cours de modification
 let choisie = null;                           // [nom, ligne] sélectionnée (sinon : la prochaine série)
 let onglet = "seance";                        // « seance », « sante » ou « progres »
@@ -116,7 +116,9 @@ const clefSuperset = (a, b) => [a, b].sort().join(" + ");
 // « Sans superset » pendant l'enchaînement. Gardé par jour dans le téléphone : un rafraîchissement ne la rebranche pas.
 const SS_OFF = `carnet:ss-off:${jour}`;
 const ssOff = new Set(lire(SS_OFF, []));
-try { for (const k of Object.keys(localStorage)) if (k.startsWith("carnet:ss-off:") && k !== SS_OFF) localStorage.removeItem(k); } catch {}
+// Valeurs vues au dernier dessiner() : la saisie et les paires coupées changent le plan de la montre.
+let saisieVue = JSON.stringify(saisie), ssOffVu = JSON.stringify([...ssOff]);
+try { for (const k of Object.keys(localStorage)) if ((k.startsWith("carnet:ss-off:") && k !== SS_OFF) || (k.startsWith("carnet:saisie:") && k !== `carnet:saisie:${jour}`)) localStorage.removeItem(k); } catch {}
 const ssActif = (nom) => { const p = partenaireSuperset(nom); return !!p && !ssOff.has(clefSuperset(nom, p)); };
 function couperSuperset(a, b, off) {
   const k = clefSuperset(a, b);
@@ -425,7 +427,17 @@ function exosAffiches(d) {
   return prevus;
 }
 
-function dessiner() { dessinerPage(); majGrand(true); }
+function dessiner() {
+  // Point commun à tous les gestes : la saisie du jour est gardée, et un changement (saisie ou paire de
+  // superset coupée) republie le plan pour la montre 1,5 s plus tard.
+  const s = JSON.stringify(saisie), o = JSON.stringify([...ssOff]);
+  if (s !== saisieVue || o !== ssOffVu) {
+    if (s !== saisieVue) ecrire(`carnet:saisie:${jour}`, saisie);
+    saisieVue = s; ssOffVu = o;
+    programmerPublication();
+  }
+  dessinerPage(); majGrand(true);
+}
 
 function dessinerPage() {
   const app = $("#app");
@@ -1885,7 +1897,11 @@ function planMontre() {
 // publication réussie (clePlan ignore v), sauf `force` : après charger(), le dernier appareil réveillé fait
 // foi. Une publication à la fois : un appel pendant un envoi est rejoué une fois à la fin, sans forcer (le
 // plan vient de partir, la comparaison suffit). Un échec ne retient rien : on réessaiera au prochain appel.
-let publication = false, republier = false;
+let publication = false, republier = false, minuPublication = 0;
+function programmerPublication() {
+  clearTimeout(minuPublication);
+  minuPublication = setTimeout(publierPlan, 1500);
+}
 async function publierPlan(force = false) {
   if (!cle) return;
   if (publication) { republier = true; return; }
