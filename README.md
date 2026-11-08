@@ -3,9 +3,13 @@
 Carnet de musculation personnel (anciennement « carnet ») : une PWA sans framework ni build (une page, un script, un
 service worker) pour noter ses séries au téléphone, à la salle, même sans réseau.
 
-- **Données** : une base Supabase, fermée. Quatre fonctions SQL (`carnet_lire`, `carnet_ecrire`,
-  `carnet_depuis`, `carnet_contexte`) vérifient une clé secrète dont la base ne garde que
-  l'empreinte. La clé publiable inscrite dans `app.js` ne donne accès à rien sans elle.
+- **Données** : une base Supabase, fermée. Des fonctions SQL (`carnet_lire`, `carnet_ecrire`,
+  `carnet_depuis`, `carnet_contexte`, `carnet_photo_deposer`, `carnet_photos_prendre`,
+  `carnet_photos_effacer`, `carnet_montre_publier`, `carnet_montre_appuis`) vérifient une clé secrète
+  dont la base ne garde que l'empreinte. La clé publiable inscrite dans `app.js` ne donne accès à rien
+  sans elle. Deux autres fonctions (`carnet_montre_plan`, `carnet_montre_appui`) sont réservées à
+  l'appli de la montre, qui a sa propre clé, distincte de celle du carnet : elle ne lit que le plan du
+  jour et n'écrit que ses appuis (tests : `supabase/tests/lancer.sh`).
 - **Clé** : posée une fois sur le téléphone par un lien `…/#cle=…` (QR code affiché par
   `carnet-sync --lien` sur le PC), gardée dans le `localStorage`, retirée de l'adresse.
 - **Hors ligne** : chaque série est enregistrée sur le téléphone d'abord, envoyée ensuite,
