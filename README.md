@@ -90,6 +90,14 @@ service worker) pour noter ses séries au téléphone, à la salle, même sans r
   Le carnet endormi (téléphone en veille) ne reçoit le message qu'au réveil : l'appui est gardé en file (cache `carnet-montre`), relu
   à chaque retour au premier plan ; sans accusé de réception sous 2 s, le service worker ramène le carnet au premier plan. Une
   notification « ✓ Série notée » confirme sur la montre, et le journal des échanges s'affiche sous le réglage.
+- **Appli montre** (Connect IQ, Venu 3) : le carnet calcule le plan restant du jour (exercices, charges, séries, repos,
+  supersets) et le publie (`carnet_montre_publier`, republié à chaque changement, échauffement compris). L'appli le déroule
+  seule, lance le repos, vibre à la fin, et envoie chaque appui (`carnet_montre_appui`, avec sa propre clé). Au réveil, le
+  carnet intègre les appuis (`carnet_montre_appuis`, curseur `carnet:montre-appui`) : garde `m` = id de l'appui (jamais deux
+  fois), garde de rang (« déjà noté » si la série existe), heure de la série = heure de l'appui. Le repos du téléphone
+  s'aligne sur celui de la montre, sans notification de fin. La saisie du jour est gardée par jour (`carnet:saisie:<jour>`),
+  pour survivre au rechargement. Le chemin par notification ci-dessus reste valable.
+- Tests : `TZ=Europe/Paris node --test test/*.test.mjs`
 - **Série ratée** : sous la cible, la question de la réserve dit « 4 sur 6 » et 0 devient « échec ». Sous la cible, la charge
   reste et la série la plus faible vise +1, quelle que soit la raison ; la réserve dit si c'était l'échec ou un arrêt avant.
 - **Rapport sport** (onglet Santé, depuis le 2026-11-05) : le rapport que Claude écrit chaque dimanche sur le PC
