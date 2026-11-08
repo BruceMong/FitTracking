@@ -1249,52 +1249,92 @@ function sante() {
 
 // ───────────────────────────────────────── les gestes
 
-// Un échauffement fait (bouton de la carte, grand format ou montre) : repos court, sans réserve.
-function cocherEchauffement(nom) {
+// Un geste se fait en trois temps : noter (l'état de la séance et de la saisie), décider la suite (sans
+// effet), puis les effets (vibration, enregistrement, repos). Scindés pour que le plan publié pour la
+// montre rejoue exactement la même décision que le grand format, sur une copie de l'état, sans rien
+// lancer ni enregistrer.
+
+// L'échauffement à faire de l'exercice, noté fait à l'heure t : { l } (la ligne notée), ou null s'il
+// n'en reste aucun. Rien d'autre : ni vibration, ni enregistrement, ni repos.
+function noterEchauffement(nom, t = new Date().toTimeString().slice(0, 8)) {
   const s = seanceDuJour();
-  // Un échauffement fait : un repos court (1 min), sans réserve à noter.
   const { W, st } = lignesDe(nom), l = W.find((x) => !x.fait);
-  if (!l) return;
+  if (!l) return null;
   let e = s.exos.find((x) => x.nom === nom);
   if (!e) { e = { nom, series: [] }; s.exos.push(e); }
-  (e.ech ||= []).push({ c: l.c, r: l.r, t: new Date().toTimeString().slice(0, 8) });
+  (e.ech ||= []).push({ c: l.c, r: l.r, t });
   st.ech = Math.max(0, st.ech - 1); delete st.echEdits[l.k];
   if (s.excuse) s.excuse = null;
+  return { l };
+}
+
+// Un échauffement fait (bouton de la carte, grand format ou montre) : repos court, sans réserve.
+function cocherEchauffement(nom) {
+  if (!noterEchauffement(nom)) return;
+  // Un échauffement fait : un repos court (1 min), sans réserve à noter.
   navigator.vibrate?.(30);
   sauver();
   const suiv = lignesDe(nom).W.find((x) => !x.fait) || lignesDe(nom).L.find((x) => !x.fait);
   lancerRepos(nom, `${nom} · échauffement fait`, suiv ? `${kg(suiv.c)} kg × ${suiv.r}` : "", 60);
 }
 
-// La prochaine série de l'exercice, faite : depuis la carte, le grand format ou la montre.
-function validerSerie(nom) {
+// La prochaine série de l'exercice, notée faite à l'heure t : { e, L, k0, n, mode, ci } (L et k0 tels
+// qu'avant la série), ou null s'il n'en reste aucune. Le marquage du superset actif (e.ss, et celui du
+// partenaire) en fait partie : il part ainsi au même enregistrement que la série.
+function noterSerie(nom, t = new Date().toTimeString().slice(0, 8)) {
   const s = seanceDuJour();
-  const { L, k0, n, st, der, ci } = lignesDe(nom), l = L.find((x) => x.k === k0);
-  if (!l) return;
+  const { L, k0, n, st, ci } = lignesDe(nom), l = L.find((x) => x.k === k0);
+  if (!l) return null;
   let e = s.exos.find((x) => x.nom === nom);
   if (!e) { e = { nom, series: [] }; s.exos.push(e); }
   if (e.series.length >= n) st.extra = Math.max(0, st.extra - 1);   // une série ajoutée en plus est faite
   const mode = mesureDe(nom);
   // Sans charge : c = 0 ; une tenue porte u = "s" (le PC l'écrit « 45 s » dans seances.md).
-  e.series.push({ c: mode === "charge" ? l.c : 0, r: l.r, ...(mode === "duree" ? { u: "s" } : {}), t: new Date().toTimeString().slice(0, 8) });
+  e.series.push({ c: mode === "charge" ? l.c : 0, r: l.r, ...(mode === "duree" ? { u: "s" } : {}), t });
   delete st.edits[k0];
   if (s.excuse) s.excuse = null;   // finalement, séance : le jour n'est plus excusé
   choisie = null; ouvert = nom;
+  if (ssActif(nom)) {
+    const part = partenaireSuperset(nom), pExo = s.exos.find((x) => x.nom === part);
+    e.ss = clefSuperset(nom, part); if (pExo) pExo.ss = e.ss;
+  }
+  return { e, L, k0, n, mode, ci };
+}
+
+// Ce qui suit la série que noterSerie vient de noter, sans aucun effet :
+// - { quoi: "superset", part } : le partenaire est encore en retard, on l'enchaîne sans repos ;
+// - { quoi: "fin", autre } : l'exercice est fini ; autre : un autre exercice affiché a encore des séries ;
+// - { quoi: "repos", duree: 120, ss: true } : repos après la paire du superset ;
+// - { quoi: "repos", duree } : le repos de l'exercice.
+// « Repos seul » (ssOff) débranche la paire pour la séance (machine occupée) : chacun se fait seul.
+function suiteApres(nom, { e, L, k0, n }) {
+  const s = seanceDuJour();
+  const part = partenaireSuperset(nom), ssOn = ssActif(nom);
+  const pExo = part ? s.exos.find((x) => x.nom === part) : null;
+  const selfFini = e.series.length >= n && !L.some((x) => x.k > k0);
+  const partFini = pExo ? pExo.series.length >= schemaDe(part).series : false;
+  if (ssOn && !partFini && (pExo?.series.length || 0) < e.series.length) return { quoi: "superset", part };
+  if (selfFini && (!ssOn || partFini)) return { quoi: "fin", autre: exosAffiches(s).some((x) => x !== nom && resteSeries(x)) };
+  if (ssOn) return { quoi: "repos", duree: 120, ss: true };
+  return { quoi: "repos", duree: reposDe(nom) };
+}
+
+// La prochaine série de l'exercice, faite : depuis la carte, le grand format ou la montre.
+function validerSerie(nom) {
+  const note = noterSerie(nom);
+  if (!note) return;
+  const { e, L, k0, n, mode, ci } = note;
   navigator.vibrate?.(30);
   sauver();
   // Superset : si le partenaire est encore en retard, on enchaîne sans repos ; sinon repos de 120 s
-  // après la paire. « Repos seul » (ssOff) débranche la paire pour la séance (machine occupée).
-  const part = partenaireSuperset(nom), ssOn = ssActif(nom);
-  const pExo = part ? s.exos.find((x) => x.nom === part) : null;
-  if (ssOn) { e.ss = clefSuperset(nom, part); if (pExo) pExo.ss = e.ss; }
-  const selfFini = e.series.length >= n && !L.some((x) => x.k > k0);
-  const partFini = pExo ? pExo.series.length >= schemaDe(part).series : false;
-  if (ssOn && !partFini && (pExo?.series.length || 0) < e.series.length) {
-    enchainerSuperset(part, nom);
-  } else if (selfFini && (!ssOn || partFini)) {
+  // après la paire.
+  const suite = suiteApres(nom, note);
+  if (suite.quoi === "superset") {
+    enchainerSuperset(suite.part, nom);
+  } else if (suite.quoi === "fin") {
     finExercice(nom);
-  } else if (ssOn) {
-    lancerRepos(nom, "Superset · repos", `${nom} ↔ ${part}`, 120);
+  } else if (suite.ss) {
+    lancerRepos(nom, "Superset · repos", `${nom} ↔ ${partenaireSuperset(nom)}`, suite.duree);
   } else {
     const suiv = L.find((x) => x.k === k0 + 1);
     lancerRepos(nom, `${nom} · série ${e.series.length + 1}/${Math.max(n, L.length)} ensuite`, suiv ? (mode === "charge" ? `${kg(suiv.c)} kg × ${suiv.r}` : serieTxt(nom, suiv.c, suiv.r)) : "");
