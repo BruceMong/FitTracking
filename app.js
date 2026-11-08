@@ -380,7 +380,17 @@ async function synchroniser() {
   else { etat("ok", "enregistré ✓"); publierPlan(); }   // rien en attente : le plan suit la séance
 }
 
+// La lecture du serveur en cours (ou la dernière, résolue) : integrerAppuis l'attend avant de toucher une
+// séance. luServeur : la dernière lecture a réussi (distantes est à jour).
+let chargement = Promise.resolve(), luServeur = false;
 async function charger() {
+  await (chargement = lireServeur());
+  reveil++;
+  synchroniser(); dessiner();
+  // Les appuis de l'appli montre d'abord : le plan publié (forcé) les a déjà retirés.
+  integrerAppuis().then(() => publierPlan(true));
+}
+async function lireServeur() {
   try {
     const r = await api("carnet_lire");
     if (r?.contexte) { ctx = r.contexte; ecrire("carnet:ctx", ctx); }
@@ -393,16 +403,14 @@ async function charger() {
       doc = serveur;
       ecrire(`carnet:seance:${jour}`, { doc, sale: false });
     }
+    luServeur = true;
     etat("ok", ctx?.genere ? `PC vu ${ctx.genere.slice(8, 10)}/${ctx.genere.slice(5, 7)} ${ctx.genere.slice(11, 16)}` : "");
   } catch (e) {
+    luServeur = false;
     console.warn("lecture impossible", e.message);
     if (e.code === "28000") { cle = null; localStorage.removeItem("carnet:cle"); }
     etat("attente", "hors ligne");
   }
-  reveil++;
-  synchroniser(); dessiner();
-  // Les appuis de l'appli montre d'abord : le plan publié (forcé) les a déjà retirés.
-  integrerAppuis().then(() => publierPlan(true));
 }
 
 function etat(classe, texte) {
@@ -1926,18 +1934,25 @@ async function publierPlan(force = false) {
 // (carnet:montre-appui, simple raccourci : la garde est dans la séance) et appliqués dans l'ordre. La série
 // notée est celle de l'appui (c, r, u, à l'heure t), pas celle que le carnet recalculerait : c'est ce qui a été
 // fait. Une intégration à la fois : un appel pendant une intégration rend celle en cours, sans rien relancer.
+// Rien n'est appliqué avant la fin de la lecture du serveur en cours (charger), y compris une lecture partie
+// pendant la relève des appuis (focus et visibilitychange arrivent presque ensemble) : une séance périmée,
+// marquée « à envoyer », écraserait celle du serveur. Un appui en « attente » (séance pas sûre, voir
+// seancePourAppui) arrête le curseur : il sera relu, et la garde m écarte ceux qui l'avaient suivi.
 let integration = null;
+async function apresLecture() { for (let c; c !== chargement;) await (c = chargement); }
 function integrerAppuis() {
   if (!cle) return Promise.resolve();
   return integration ||= (async () => {
     try {
       const xs = await api("carnet_montre_appuis", { p_depuis: lire("carnet:montre-appui", 0) }) || [];
       if (!xs.length) return;
+      await apresLecture();   // une lecture partie avant ou pendant la relève : on l'attend
       const autres = new Map();   // jour → séance d'un autre jour qui a reçu une série
-      let notees = 0, deja = 0, duJour = null;
+      let notees = 0, deja = 0, duJour = null, arret = false;
       for (const x of xs) {
         const v = appliquerAppui(x.appui, autres);
-        ecrire("carnet:montre-appui", x.id);
+        if (v === "attente") arret = true;
+        if (!arret) ecrire("carnet:montre-appui", x.id);
         if (v === "noter") { notees++; if (x.appui.jour === jour) duJour = x.appui; }
         if (v === "deja-note") deja++;
       }
@@ -1953,9 +1968,28 @@ function integrerAppuis() {
   })();
 }
 
-// Un appui appliqué à la séance de son jour ; rend le verdict de la garde ("noter" s'il a été noté). La séance
-// d'un autre jour (carnet ouvert le lendemain) vient du téléphone, sinon du serveur, sinon est créée ; elle
-// est gardée dans `autres` le temps de l'intégration et écrite « à envoyer ». Pas de repos pour elle.
+// La séance du jour `j` à laquelle ajouter un appui, ou null si elle n'est pas sûre : la dernière lecture du
+// serveur a raté et le jour n'est connu ni du téléphone ni du cache `distantes` (en créer une l'écraserait au
+// serveur). Le jour même : la séance en mémoire, déjà accordée au serveur par charger. Un autre jour : la copie
+// du téléphone si elle est à envoyer, sinon la plus récente (maj) du téléphone et du serveur, sinon une neuve.
+function seancePourAppui(j, autres) {
+  const local = lire(`carnet:seance:${j}`), dist = distantes.find((s) => s.jour === j);
+  const connu = luServeur || !!local?.doc || !!dist;
+  if (j === jour) return connu ? seanceDuJour() : null;
+  if (autres.has(j)) return autres.get(j);
+  if (!connu) return null;
+  const copie = (x) => JSON.parse(JSON.stringify(x));
+  const d = local?.sale ? local.doc
+    : local?.doc && dist ? ((dist.maj || "") > (local.doc.maj || "") ? copie(dist) : local.doc)
+    : local?.doc || (dist ? copie(dist) : { jour: j, type: "autre", exos: [], note: "" });
+  if (d.type === "repos") d.type = "autre";   // comme seanceDuJour : une série notée en fait une séance
+  return d;
+}
+
+// Un appui appliqué à la séance de son jour (seancePourAppui) ; rend le verdict de la garde ("noter" s'il a
+// été noté), ou "attente" si cette séance n'est pas sûre (rien n'est fait, ni journalisé : il sera relu). La
+// séance d'un autre jour est gardée dans `autres` le temps de l'intégration et écrite « à envoyer ». Pas de
+// repos pour elle.
 function appliquerAppui(a, autres = new Map()) {
   const quoi = `${a?.nom}, ${a?.quand}`;
   // Illisible : sans id, nom ou rang ; ou un jour, une charge, des répétitions qui ne se notent pas.
@@ -1963,12 +1997,8 @@ function appliquerAppui(a, autres = new Map()) {
     journaliserMontre("appli montre : appui illisible"); return "invalide";
   }
   const auJour = a.jour === jour, k = `carnet:seance:${a.jour}`;
-  let d = auJour ? seanceDuJour() : autres.get(a.jour);
-  if (!d) {
-    const dist = distantes.find((s) => s.jour === a.jour);
-    d = lire(k)?.doc || (dist ? JSON.parse(JSON.stringify(dist)) : { jour: a.jour, type: "autre", exos: [], note: "" });
-    if (d.type === "repos") d.type = "autre";   // comme seanceDuJour : une série notée en fait une séance
-  }
+  const d = seancePourAppui(a.jour, autres);
+  if (!d) return "attente";
   const v = verdictAppui(d, a);
   if (v === "doublon") journaliserMontre(`appli montre : déjà intégré : ${quoi}`);
   if (v === "deja-note") journaliserMontre(`appli montre : déjà noté : ${quoi}`);
