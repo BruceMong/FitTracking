@@ -1,6 +1,6 @@
 // Hors ligne : l'appli elle-même vient du cache (la salle capte mal), les appels à la base
 // passent toujours par le réseau — les séances en attente sont gardées par app.js.
-const VERSION = "fittracking-v38";
+const VERSION = "fittracking-v39";
 const FICHIERS = ["./", "index.html", "app.js", "fiches.js", "pictos.js", "corps.js", "manifest.webmanifest", "icon.svg", "icon-192.png", "icon-512.png"];
 // Les photos des fiches d'exercice (~1 Mo), en cache dès l'installation : la salle capte mal.
 const IMAGES = [
@@ -179,6 +179,12 @@ const journal = async (quoi) => ecrireMontre("journal", [...(await lireMontre("j
 const accuses = new Map();   // id de série → résout l'attente d'accusé de réception
 
 self.addEventListener("message", (e) => {
+  if (e.data?.test) {   // bouton « Tester la montre » : une notification avec bouton, tout de suite, sans série
+    e.waitUntil(journal("test : notification envoyée").then(() => self.registration.showNotification("Test montre", {
+      body: "Appuie sur « Série faite » ici, puis sur la montre", tag: "test", renotify: true, icon: "icon-192.png",
+      vibrate: [300, 150, 300], data: { test: true }, actions: [{ action: "serie", title: "Série faite" }] })));
+    return;
+  }
   if (e.data?.accuse) {   // la page a traité l'appui : confirmation sur la montre
     accuses.get(e.data.accuse)?.();
     e.waitUntil(Promise.all([journal(e.data.texte || "noté par le carnet"),
@@ -203,6 +209,7 @@ self.addEventListener("message", (e) => {
     // « toujours » (réglage Montre) : même carnet à l'écran, pour que la montre vibre et porte le bouton.
     if (!e.data.toujours && pages.some((c) => c.visibilityState === "visible")) return;
     const s = e.data.serie;
+    await journal(s ? `notification envoyée : Go · ${s.nom}, avec le bouton` : "notification envoyée : repos fini, sans bouton");
     await self.registration.showNotification(s ? `Go · ${s.nom}` : "Repos fini", {
       body: s ? `${s.quand} · ${s.txt}` : e.data.quoi || "", tag: "repos", renotify: true, icon: "icon-192.png",
       vibrate: [300, 150, 300, 150, 300], data: s || null,
@@ -211,11 +218,24 @@ self.addEventListener("message", (e) => {
   }));
 });
 
+// Une notification balayée sans être touchée : notée aussi.
+self.addEventListener("notificationclose", (e) => e.waitUntil(journal(`notification balayée : « ${e.notification.title} »`)));
+
 // Toucher la notification ramène au carnet. Son bouton « Série faite » (sur le téléphone, ou relayé par la
 // montre) part à la page, qui note la série ; carnet fermé, il le rouvre avec la série dans l'adresse.
 self.addEventListener("notificationclick", (e) => {
   e.notification.close();
   const d = e.notification.data;
+  // Tout appui va au journal, avec l'action telle que reçue : c'est elle qui dit si le bouton est
+  // bien parvenu jusqu'ici, ou s'il est arrivé comme un simple appui sur le texte (action vide).
+  const vu = journal(`appui sur « ${e.notification.title} » : ${e.action ? `bouton « ${e.action} »` : "le texte (pas de bouton)"}`);
+  if (d?.test) {
+    e.waitUntil(vu.then(() => e.action === "serie" ? self.registration.showNotification("✓ Appui bien reçu", {
+      body: "Le bouton marche jusqu'au carnet", tag: "test", renotify: true, icon: "icon-192.png", vibrate: [120] }) : null)
+      .then(() => self.clients.matchAll({ type: "window" })).then((cs) => cs.forEach((c) => c.postMessage({ journal: 1 }))));
+    return;
+  }
+  e.waitUntil(vu);
   if (e.action === "serie" && d) {
     e.waitUntil((async () => {
       await journal(`appui reçu : ${d.nom}, ${d.quand}`);

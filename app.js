@@ -566,7 +566,8 @@ function dessinerPage() {
     <span><b>Valider depuis la montre</b><span class="sous">à la fin de chaque repos, une notification « Série faite » que ta montre
     relaie : la toucher note la série prévue et lance le repos. Les répétitions se corrigent ensuite ici.</span></span></button>
     ${montre ? `<div class="sous montre-journal">${journalMontre.length ? `Derniers échanges avec la montre :<br>${journalMontre.slice(-5).reverse()
-      .map((x) => `${new Date(x.t).toTimeString().slice(0, 8)} · ${esc(x.quoi)}`).join("<br>")}` : "Aucun appui reçu de la montre pour l'instant."}</div>` : ""}</div>`;
+      .map((x) => `${new Date(x.t).toTimeString().slice(0, 8)} · ${esc(x.quoi)}`).join("<br>")}` : "Journal vide : aucune notification ni aucun appui encore."}
+      <div class="ligne2"><button data-montre-test>Tester la montre</button><button data-montre-journal>Actualiser</button></div></div>` : ""}</div>`;
   // Épaule droite : la douleur du jour règle la réintroduction des exercices en pause.
   const dl = s.douleur;
   h += `<div class="carte"><b>Épaule droite</b> <span class="sous">douleur aujourd'hui, de 0 à 10</span>
@@ -1368,6 +1369,13 @@ document.addEventListener("click", (ev) => {
     if (x) { const k = Number(t.dataset.reserve); if (x.e === k) delete x.e; else x.e = k; sauver(); }
   } else if (t.dataset.periode) {
     periode = Number(t.dataset.periode); ecrire("carnet:periode", periode);
+  } else if (t.hasAttribute("data-montre-test")) {
+    if (window.Notification?.permission !== "granted") { toast(`Notifications ${window.Notification?.permission === "denied" ? "refusées" : "pas encore autorisées"} pour le carnet`); Notification?.requestPermission?.(); }
+    else if (!navigator.serviceWorker?.controller) toast("Service worker pas encore actif : recharge le carnet");
+    else { navigator.serviceWorker.controller.postMessage({ test: true }); toast("Notification de test envoyée"); setTimeout(relireMontre, 800); }
+    return;
+  } else if (t.hasAttribute("data-montre-journal")) {
+    relireMontre(); return;
   } else if (t.hasAttribute("data-montre")) {
     montre = !montre; ecrire("carnet:montre", montre);
     if (montre && window.Notification?.permission === "default") Notification.requestPermission();
@@ -1789,9 +1797,9 @@ async function relireMontre() {
     const c = await caches.open("carnet-montre"), r = await c.match("attente");
     const attente = r ? await r.json() : [];
     if (attente.length) { await c.put("attente", new Response("[]")); attente.forEach(depuisMontre); }
-    const j = await c.match("journal"), avant = journalMontre.length;
+    const j = await c.match("journal"), avant = JSON.stringify(journalMontre);
     journalMontre = j ? await j.json() : [];
-    if (montre && journalMontre.length !== avant && onglet === "seance") dessiner();
+    if (montre && JSON.stringify(journalMontre) !== avant && onglet === "seance") dessiner();
   } catch {}
 }
 
@@ -2234,7 +2242,7 @@ document.addEventListener("visibilitychange", () => { if (!document.hidden) { ch
 if (minu) garder();
 if ("serviceWorker" in navigator) {
   navigator.serviceWorker.register("sw.js");
-  navigator.serviceWorker.addEventListener("message", (e) => { if (e.data?.montre) { depuisMontre(e.data.montre); relireMontre(); } });
+  navigator.serviceWorker.addEventListener("message", (e) => { if (e.data?.montre) depuisMontre(e.data.montre); if (e.data?.montre || e.data?.journal) relireMontre(); });
   relireMontre(); addEventListener("focus", relireMontre);
   // Une nouvelle version prend la main : la page se recharge pour l'afficher tout de suite (tout est déjà
   // enregistré sur le téléphone, minuteur compris). Pas au premier lancement, où il n'y avait rien avant.
