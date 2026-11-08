@@ -220,8 +220,11 @@ AS $function$
 declare s text; i bigint;
 begin
   perform private.verifier_montre(p_cle);
+  if jsonb_typeof(p_appui -> 'id') is distinct from 'string' then
+    raise exception 'appui sans id' using errcode = '22023';
+  end if;
   s := p_appui ->> 'id';
-  if s is null or s = '' then
+  if btrim(s) = '' then
     raise exception 'appui sans id' using errcode = '22023';
   end if;
   if length(p_appui::text) > 2000 then

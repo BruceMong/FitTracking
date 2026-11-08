@@ -76,7 +76,7 @@ end $$;
 
 -- appui_sans_id_refuse (trois formes), appui_trop_long_refuse
 do $$ declare x jsonb; begin
-  foreach x in array array['{}'::jsonb, '{"id": ""}'::jsonb, null::jsonb] loop
+  foreach x in array array['{}'::jsonb, '{"id": ""}'::jsonb, '{"id": "  "}'::jsonb, '{"id": 5}'::jsonb, '{"id": null}'::jsonb, null::jsonb] loop
     begin
       perform public.carnet_montre_appui('cle-montre-essai', x);
       raise exception 'appui sans id accepté : %', x;
@@ -108,6 +108,17 @@ do $$ declare l jsonb; premier bigint; begin
   assert jsonb_array_length(public.carnet_montre_appuis('cle-carnet-essai', 0)) = 2, 'appui de plus de 7 jours renvoyé';
 end $$;
 
+-- appuis_ordre_des_id_et_non_physique : lignes insérées dans le désordre (id forcés), l'ordre suit l'id
+do $$ declare l jsonb; begin
+  delete from public.montre_appuis;
+  insert into public.montre_appuis (id, serie, appui) overriding system value values
+    (900, 'ordre|c', '{"id": "ordre|c"}'), (100, 'ordre|a', '{"id": "ordre|a"}'), (500, 'ordre|b', '{"id": "ordre|b"}');
+  l := public.carnet_montre_appuis('cle-carnet-essai', 0);
+  assert (select array_agg(e ->> 'id' order by ord) from jsonb_array_elements(l) with ordinality t(e, ord))
+         = array['100', '500', '900'], 'appuis non rendus dans l''ordre des id';
+  delete from public.montre_appuis;
+end $$;
+
 -- cles_croisees_refusees : chaque fonction n'ouvre que sa clé
 do $$ declare appel text; begin
   foreach appel in array array[
@@ -127,7 +138,33 @@ end $$;
 -- fonctions_securisees : security definer et search_path figé, comme l'existant
 do $$ begin
   assert (select count(*) from pg_proc p join pg_namespace n on n.oid = p.pronamespace
-          where p.proname in ('carnet_montre_publier', 'carnet_montre_plan', 'carnet_montre_appui',
+          where n.nspname in ('public', 'private') and p.proname in ('carnet_montre_publier', 'carnet_montre_plan', 'carnet_montre_appui',
                               'carnet_montre_appuis', 'verifier_montre')
             and p.prosecdef and p.proconfig @> array['search_path=""']) = 5, 'fonction sans security definer ou search_path';
+end $$;
+
+-- anon_ne_peut_pas_ecrire : RLS sans politique refuse l'insertion directe
+set role anon;
+do $$ begin
+  insert into public.montre_appuis (serie, appui) values ('anon|x', '{"id": "anon|x"}');
+  raise exception 'anon a inséré dans montre_appuis';
+exception when insufficient_privilege then null;
+end $$;
+do $$ begin
+  insert into public.montre_plan (plan) values ('{}');
+  raise exception 'anon a inséré dans montre_plan';
+exception when insufficient_privilege then null;
+end $$;
+reset role;
+
+-- anon_appelle_les_fonctions_de_la_montre : rôle réel de PostgREST, clé de la montre
+set role anon;
+do $$ declare r jsonb; begin
+  assert public.carnet_montre_plan('cle-montre-essai') is not null, 'plan illisible sous anon';
+  r := public.carnet_montre_appui('cle-montre-essai', '{"id": "anon|appel"}');
+  assert r ->> 'ok' = 'true', 'appui refusé sous anon';
+end $$;
+reset role;
+do $$ begin
+  assert (select count(*) from public.montre_appuis where serie = 'anon|appel') = 1, 'appui sous anon non inséré';
 end $$;

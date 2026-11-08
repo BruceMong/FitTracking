@@ -1,5 +1,5 @@
 -- Migration « montre » : tables montre_plan et montre_appuis, clé de la montre et sa vérification,
--- puis (partie suivante) les quatre fonctions RPC carnet_montre_*.
+-- et les quatre fonctions RPC carnet_montre_*.
 -- Écrite le 2026-11-09. Appliquée en production le : (à remplir à l'application).
 -- Rejouable : create ... if not exists, create or replace.
 
@@ -77,8 +77,11 @@ AS $function$
 declare s text; i bigint;
 begin
   perform private.verifier_montre(p_cle);
+  if jsonb_typeof(p_appui -> 'id') is distinct from 'string' then
+    raise exception 'appui sans id' using errcode = '22023';
+  end if;
   s := p_appui ->> 'id';
-  if s is null or s = '' then
+  if btrim(s) = '' then
     raise exception 'appui sans id' using errcode = '22023';
   end if;
   if length(p_appui::text) > 2000 then
