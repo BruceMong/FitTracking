@@ -2201,13 +2201,91 @@ function bip() {
   } catch {}
 }
 
+// Les gestes du repos et du grand format, nommés : les boutons du téléphone et les gestes de la montre
+// passent par les mêmes fonctions. Chacune rend true si elle a agi (false : geste sans objet, rien n'est fait)
+// et garde le minuteur (garder) quand elle le touche. ±15 s et pause ne servent qu'au repos (mode "repos").
+
+// ±d secondes sur le repos en cours (rattrapage du chrono uniquement : jamais mémorisé, voir reposDe).
+function ajusterRepos(d) {
+  if (minu?.mode !== "repos" || !Number.isFinite(d)) return false;
+  if (minu.restant != null) minu.restant += d; else minu.fin += d * 1000;
+  minu.duree = Math.max(15, minu.duree + d);
+  if ((minu.restant ?? (minu.fin - Date.now()) / 1000) > 0) sonne = false;
+  garder(); return true;
+}
+// Pause à l'instant t (l'heure du geste) : le restant est figé.
+function pauseRepos(t = Date.now()) {
+  if (minu?.mode !== "repos" || minu.restant != null) return false;
+  minu.restant = (minu.fin - t) / 1000;
+  garder(); return true;
+}
+function reprendreRepos(t = Date.now()) {
+  if (minu?.mode !== "repos" || minu.restant == null) return false;
+  minu.fin = t + minu.restant * 1000; minu.restant = null;
+  garder(); return true;
+}
+// « Go » / « Passer » / « Sans repos » du grand format : le repos s'arrête, l'exercice proposé s'ouvre.
+function passerRepos() {
+  if (minu?.mode !== "repos" && minu?.mode !== "fin") return false;
+  ouvert = exoGrand(); choisie = null; arreterRepos();
+  return true;
+}
+// Les flèches du grand format : l'exercice suivant (1) ou précédent (-1) de ceux qui ont encore des séries.
+function changerExo(sens) {
+  if (sens !== 1 && sens !== -1) return false;
+  const suite = exosAffiches(seanceDuJour()).filter(resteSeries), i = suite.indexOf(exoGrand());
+  if (!suite.length) return false;
+  ouvert = suite[(i + (sens === 1 ? 1 : suite.length - 1)) % suite.length]; choisie = null;
+  return true;
+}
+// « + une série » : une ligne prévue de plus pour l'exercice (le repos continue).
+function uneSerieDePlus(nom) {
+  if (!nom || !exosAffiches(seanceDuJour()).includes(nom)) return false;
+  lignesDe(nom).st.extra++;
+  return true;
+}
+// La réserve (0 à 4+) de la série i de l'exercice.
+function noterReserve(nom, i, e) {
+  const x = seanceDuJour().exos.find((z) => z.nom === nom)?.series?.[i];
+  if (!x || !Number.isInteger(e) || e < 0 || e > 4) return false;
+  x.e = e; sauver();
+  if (minu) garder();
+  return true;
+}
+// Un appui de l'appli montre annulé : la série (ou l'échauffement) qu'il a notée (marque m === id) est retirée
+// de la séance du jour, les réglages des lignes suivantes décalés comme retirerSerie, l'exercice resté vide
+// retiré, et le repos lancé par cet appui arrêté.
+function annulerAppui(id) {
+  const s = seanceDuJour();
+  for (const e of s.exos) {
+    const ech = !e.series?.some((x) => x.m === id), l = ech ? e.ech : e.series, i = l?.findIndex((x) => x.m === id) ?? -1;
+    if (i < 0) continue;
+    l.splice(i, 1);
+    let effort = false;
+    if (ech) { lignesDe(e.nom).st.echEdits = {}; if (!e.ech.length) delete e.ech; }   // comme le × d'un échauffement
+    else {
+      decaler(e.nom, i, -1);
+      // La réserve demandée suit sa série ; si c'est celle-ci, la question tombe.
+      const ef = minu?.effort;
+      if (ef?.nom === e.nom && ef.i >= i) { effort = true; if (ef.i === i) delete minu.effort; else ef.i--; }
+    }
+    if (!e.series.length && !e.ech?.length && !e.note && !e.hp) s.exos = s.exos.filter((z) => z !== e);
+    choisie = null;
+    if (minu?.appui === id) arreterRepos(); else if (effort) garder();
+    sauver();
+    journaliserMontre(`appli montre : ${e.nom} annulée`);
+    return true;
+  }
+  return false;
+}
+
 function clicMinuteur(ev) {
   const ef = ev.target.closest("[data-effort]");
   if (ef && minu?.effort) {
-    const x = seanceDuJour().exos.find((e) => e.nom === minu.effort.nom)?.series?.[minu.effort.i];
-    if (x) { x.e = Number(ef.dataset.effort); sauver(); dessiner(); }
+    const fait = noterReserve(minu.effort.nom, minu.effort.i, Number(ef.dataset.effort));   // garde le minuteur
+    if (fait) dessiner();
     navigator.vibrate?.(20);
-    return garder();
+    return fait || garder();
   }
   const b = ev.target.closest("[data-min]");
   if (!b || !minu) return;
@@ -2223,16 +2301,10 @@ function clicMinuteur(ev) {
   if (a === "repos2" || a === "repos1") {
     minu = { ...minu, mode: "repos", quoi: `Repos avant l'exercice suivant`, cible: "", duree: a === "repos2" ? 120 : 90, debut: Date.now() };
     minu.fin = Date.now() + minu.duree * 1000; sonne = false;
-  } else if (a === "pause") {
-    if (minu.restant != null) { minu.fin = Date.now() + minu.restant * 1000; minu.restant = null; }
-    else minu.restant = (minu.fin - Date.now()) / 1000;
-  } else {
-    const d = Number(a);
-    if (minu.restant != null) minu.restant += d; else minu.fin += d * 1000;
-    minu.duree = Math.max(15, minu.duree + d);   // rattrapage du chrono en cours uniquement : jamais mémorisé
-    if ((minu.restant ?? (minu.fin - Date.now()) / 1000) > 0) sonne = false;
+    return garder();
   }
-  garder();
+  if (a === "pause") return minu.restant != null ? reprendreRepos() : pauseRepos();
+  ajusterRepos(Number(a));
 }
 $("#minuteur").addEventListener("click", clicMinuteur);
 
@@ -2381,18 +2453,15 @@ function majGrand(complet = false) {
   $("#g-niveau").style.transform = `scaleY(${enRepos && minu.duree ? Math.max(0, Math.min(1, 1 - reste / minu.duree)) : 0})`;
 }
 
-$("#grand").addEventListener("click", (ev) => {
+function clicGrand(ev) {
   const g = ev.target.closest("[data-g]")?.dataset.g;
   if (g === "fermer") return fermerGrand();
-  if (g === "go") { ouvert = exoGrand(); choisie = null; arreterRepos(); return dessiner(); }
-  if (g === "plus") { lignesDe(minu.nom).st.extra++; return dessiner(); }   // on reste sur l'exercice, le repos continue
-  if (g === "prec" || g === "suiv") {
-    const suite = exosAffiches(seanceDuJour()).filter(resteSeries), i = suite.indexOf(exoGrand());
-    ouvert = suite[(i + (g === "suiv" ? 1 : suite.length - 1)) % suite.length]; choisie = null;
-    return dessiner();
-  }
+  if (g === "go") { passerRepos(); return dessiner(); }
+  if (g === "plus") { uneSerieDePlus(minu?.nom); return dessiner(); }   // on reste sur l'exercice, le repos continue
+  if (g === "prec" || g === "suiv") { changerExo(g === "suiv" ? 1 : -1); return dessiner(); }
   clicMinuteur(ev);
-});
+}
+$("#grand").addEventListener("click", clicGrand);
 
 // L'écran reste allumé pendant la séance (sinon il se verrouille entre deux séries).
 let verrou = null;
