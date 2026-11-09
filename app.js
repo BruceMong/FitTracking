@@ -38,6 +38,27 @@ if (location.hash.startsWith("#cle=")) {
   history.replaceState(null, "", location.pathname);   // la clé ne reste pas dans l'adresse
 }
 
+// Dans l'APK, pas de lien « #cle=… » à scanner : le champ « coller la clé » la reçoit. Le format exact n'est pas
+// vérifié ici (le serveur juge) : ni vide, ni espace dedans, ni moins de 16 caractères. cleRefusee : le serveur
+// a rejeté la clé (28000), l'accueil le dit. La clé n'est jamais écrite dans la console.
+let cleRefusee = false;
+function collerCle(texte) {
+  const t = String(texte ?? "").trim();
+  if (t.length < 16 || /\s/.test(t)) return false;
+  cle = t; cleRefusee = false;
+  ecrire("carnet:cle", cle);
+  dessiner(); charger();
+  return true;
+}
+function accueilSansCle() {
+  if (!pont) return `<div class="accueil"><p>Pas encore de clé.</p><p>Sur le PC : <b>carnet-sync --lien</b>,
+      puis scanne le QR code avec ce téléphone.</p></div>`;
+  return `<div class="accueil"><p>Pas encore de clé.</p>${cleRefusee ? `<p class="erreur">Clé refusée par le serveur</p>` : ""}
+    <p>Sur le PC : <b>carnet-sync --lien</b>, puis colle ici la clé.</p>
+    <input id="cle-collee" type="password" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="Clé du carnet">
+    <button data-cle-coller>Enregistrer la clé</button></div>`;
+}
+
 async function api(fonction, params = {}) {
   const r = await fetch(URL_API + fonction, {
     method: "POST",
@@ -423,7 +444,7 @@ async function lireServeur() {
   } catch (e) {
     luServeur = false;
     console.warn("lecture impossible", e.message);
-    if (e.code === "28000") { cle = null; localStorage.removeItem("carnet:cle"); }
+    if (e.code === "28000") { cle = null; cleRefusee = true; localStorage.removeItem("carnet:cle"); dessiner(); }
     etat("attente", "hors ligne");
   }
 }
@@ -472,8 +493,7 @@ function dessinerPage() {
   const d = new Date();
   $("#titre").textContent = `${JOURS[d.getDay()]} ${jj(jour)}`;
   if (!cle) {
-    app.innerHTML = `<div class="accueil"><p>Pas encore de clé.</p><p>Sur le PC : <b>carnet-sync --lien</b>,
-      puis scanne le QR code avec ce téléphone.</p></div>`;
+    app.innerHTML = accueilSansCle();
     return;
   }
   document.querySelectorAll("[data-onglet]").forEach((b) => b.classList.toggle("choisi", b.dataset.onglet === onglet));
@@ -1392,6 +1412,7 @@ function validerSerie(nom) {
 
 let sansClic = 0;   // après un glissement sur une série, le clic qui suit ne la sélectionne pas
 document.addEventListener("click", (ev) => {
+  if (ev.target.closest("[data-cle-coller]")) { collerCle($("#cle-collee").value); return; }
   if (Date.now() - sansClic < 450) return;
   if (ev.target.closest("input, textarea, select")) return;   // un champ garde la main (et le clavier)
   const t = ev.target.closest("button, h3, [data-ligne], [data-memo]");
