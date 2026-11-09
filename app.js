@@ -2062,7 +2062,8 @@ function appliquerGeste(brut) {
     case "regler": {
       if (!connu(m.nom)) break;
       const { L, W } = lignesDe(m.nom);
-      if (!(m.ech ? W : L).some((x) => x.k === m.k && !x.fait)) break;
+      // Une ligne faite aussi : la montre corrige la série qu'elle vient de noter (page « Dernière série »).
+      if (!(m.ech ? W : L).some((x) => x.k === m.k)) break;
       regler(m.nom, m.k, m.ech, m.champ, m.v);
       fait = true; break;
     }

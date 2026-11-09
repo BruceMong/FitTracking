@@ -130,6 +130,17 @@ test("régler : la ligne prévue suit, le plan renvoyé porte la charge", async 
   assert.deepEqual(series(b), []);   // une ligne prévue : rien de noté
 });
 
+test("corriger la dernière série : la série notée change et reste sauvée", async () => {
+  const b = await carnet();
+  await recevoir(b, geste(N, "appui", { a: appui(0) }));
+  await recevoir(b, geste(N + 1, "regler", { nom: DC, k: 0, ech: false, champ: "r", v: 5 }));
+  await recevoir(b, geste(N + 2, "regler", { nom: DC, k: 0, ech: false, champ: "c", v: 40 }));
+  assert.deepEqual([series(b)[0].c, series(b)[0].r], [40, 5]);
+  assert.deepEqual([b.stockage()["carnet:seance:2026-11-09"].doc.exos[0].series[0].c,
+    b.stockage()["carnet:seance:2026-11-09"].doc.exos[0].series[0].r], [40, 5]);   // sauvé
+  assert.equal(series(b).length, 1);
+});
+
 test("réserve après un appui : @N sur la série, le repos renvoyé le porte", async () => {
   const b = await carnet();
   await recevoir(b, geste(N, "appui", { a: appui(0) }));
@@ -168,8 +179,8 @@ test("gestes_perimes_ignores : dg avance, l'état repart, rien d'autre", async (
   assert.equal(v(N + 5, "exo", { nom: TRI, sens: 1 }), "ignore");   // la montre affiche TRI, le carnet propose DC
   assert.equal(b.json("exoGrand()"), DC);
   b.evaluer(`validerSerie(${q(DC)})`);
-  assert.equal(v(N + 6, "regler", { nom: DC, k: 0, ech: false, champ: "c", v: 50 }), "ignore");   // ligne faite
-  assert.equal(series(b)[0].c, 42.5);
+  assert.equal(v(N + 6, "regler", { nom: DC, k: 0, ech: false, champ: "c", v: 50 }), "applique");   // ligne faite : corrigée
+  assert.equal(series(b)[0].c, 50);
   assert.equal(v(N + 7, "regler", { nom: DC, k: 9, ech: false, champ: "c", v: 50 }), "ignore");   // ligne absente
   assert.equal(v(N + 8, "plus1", { nom: "Inconnu" }), "ignore");
   assert.equal(b.json(`"Inconnu" in saisie`), false);
