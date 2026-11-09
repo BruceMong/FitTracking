@@ -433,3 +433,54 @@ test("un geste qui lève après avoir noté sa série : la série est sauvée qu
   await recevoir(b, geste(N, "appui", { a: appui(0) }));
   assert.equal(b.stockage()["carnet:seance:2026-11-09"]?.doc.exos[0].series.length, 1);
 });
+
+// ── Relecture de la tâche 5, tour 2 : un repos né à la montre ne sonne pas au téléphone pour une fin que la
+// montre a déjà vibrée.
+const espionSonnerie = (b) => b.evaluer(`globalThis.sonneries = [];
+  navigator.vibrate = (x) => sonneries.push(["vibre", x]); bip = () => sonneries.push(["bip"]);`);
+
+test("appui reçu après la fin de son repos : ni vibration ni bip au téléphone", async () => {
+  const b = await carnet({ maintenant: new Date(TS + 200000).toISOString() });
+  espionSonnerie(b);
+  await recevoir(b, geste(N, "appui", { a: appui(0) }));
+  b.evaluer("majRepos()");
+  assert.deepEqual(b.json("sonneries"), []);
+  assert.equal(b.json("minu"), null);
+  // même hors d'un lot (appliquerGeste seul) : le repos né fini est marqué comme ayant sonné
+  b.evaluer(`appliquerGeste(${q(geste(N + 1, "appui", { a: appui(1) }))}); majRepos()`);
+  assert.deepEqual(b.json("[minu?.appui, sonne]"), [ID1, true]);
+  assert.deepEqual(b.json("sonneries"), []);
+});
+
+test("appui + 4 × +15 reçus à TS + 160 s : pas de sonnerie à la réception, elle vient à la fin prolongée", async () => {
+  const b = await carnet({ maintenant: new Date(TS + 160000).toISOString() });
+  espionSonnerie(b);
+  await recevoir(b, geste(N, "appui", { a: appui(0) }),
+    ...[1, 2, 3, 4].map((i) => ({ ...geste(N + i, "plus15"), ts: TS + 60000 })));
+  b.evaluer("majRepos()");
+  assert.deepEqual(b.json("sonneries"), []);
+  b.evaluer(`Date.now = () => ${TS + 211000}; majRepos(); majRepos()`);   // la fin réelle passe : une sonnerie
+  assert.deepEqual(b.json("sonneries.map((x) => x[0])"), ["vibre", "bip"]);
+});
+
+test("moins15 dans le lot qui ramène la fin dans le passé : pas de sonnerie pendant le lot", async () => {
+  const b = await carnet({ maintenant: new Date(TS + 160000).toISOString() });
+  espionSonnerie(b);
+  await recevoir(b, geste(N, "appui", { a: appui(0) }), { ...geste(N + 1, "plus15"), ts: TS + 60000 },
+    { ...geste(N + 2, "moins15"), ts: TS + 61000 });
+  assert.deepEqual(b.json("sonneries"), []);
+  assert.equal(b.json("minu"), null);   // fini après le lot : retiré
+});
+
+test("un geste qui lève puis un sauver() qui lève : le lot continue, acquitté et redessiné", async () => {
+  const b = await carnet();
+  b.evaluer(`globalThis.avertis = []; globalThis.console = { ...console, warn: (...a) => avertis.push(a.join(" ")) };
+    journaliserMontre = () => { throw new Error("panne d'essai"); }; sauver = () => { throw new Error("panne de sauver"); };`);
+  await recevoir(b, geste(N, "appui", { a: appui(0) }), geste(N + 1, "plus1", { nom: DC }));
+  // en un seul passage : la réception n'a pas été interrompue (sinon la relance la rejouerait et masquerait tout)
+  assert.ok(!b.json("avertis").some((x) => /réception de la montre/.test(x)), b.json("avertis").join(" | "));
+  assert.equal(b.json("avertis").filter((x) => /panne de sauver/.test(x)).length, 1);
+  assert.equal(b.json("pontDg"), N + 1);
+  assert.deepEqual(b.pont.acquis, [2]);
+  assert.equal(dernier(b, "plan").x[0][1], 5);   // plus1 appliqué, plan redessiné et renvoyé
+});

@@ -2038,7 +2038,7 @@ function appliquerGeste(brut) {
 // apprend que son geste est pris, même ignoré. Un repos lancé par un appui du lot est créé même si son heure de
 // fin est passée (les +15 / pause qui le suivent dans le lot le prolongent) : « déjà fini, pas de repos » ne se
 // décide qu'après le lot (reposDuLot). Appelée par l'événement `messages`, au démarrage et au retour à l'écran.
-let reception = null, rerecevoir = false, reposDuLot = null;
+let reception = null, rerecevoir = false, reposDuLot = null, enLot = false;
 function recevoirPont() {
   if (!pont) return Promise.resolve();
   if (reception) { rerecevoir = true; return reception; }
@@ -2061,17 +2061,19 @@ async function recevoirUneFois() {
   if (!messages.length) return;
   const dg = pontDg;
   let agi = false;
-  reposDuLot = null;
-  for (const { message } of messages) {
-    try {
-      if (message?.type === "bonjour") envoyerEtatPont();
-      else if (message?.type === "geste" && appliquerGeste(message) === "applique") agi = true;
-    } catch (e) {
-      agi = true;   // il a pu agir à moitié : on redessine, et une série déjà notée ne reste pas qu'en mémoire
-      if (doc) sauver();
-      console.warn("geste de la montre écarté", e?.message);
+  reposDuLot = null; enLot = true;
+  try {
+    for (const { message } of messages) {
+      try {
+        if (message?.type === "bonjour") envoyerEtatPont();
+        else if (message?.type === "geste" && appliquerGeste(message) === "applique") agi = true;
+      } catch (e) {
+        agi = true;   // il a pu agir à moitié : on redessine, et une série déjà notée ne reste pas qu'en mémoire
+        console.warn("geste de la montre écarté", e?.message);
+        try { if (doc) sauver(); } catch (e2) { console.warn("séance non sauvée", e2?.message); }
+      }
     }
-  }
+  } finally { enLot = false; }
   // Le repos d'un appui du lot, fini une fois tout le lot appliqué (et pas en pause) : pas de repos, comme par la
   // base (appui tardif) ; l'exercice ouvert est celui que proposerait la fin de ce repos.
   if (reposDuLot && minu === reposDuLot && minu.restant == null && minu.fin <= Date.now()) { ouvert = exoGrand(); arreterRepos(); }
@@ -2240,11 +2242,12 @@ function reposDepuisAppli(a, { ts, effort = false } = {}) {
   minu = { nom: a.nom, quoi: `Montre · ${a.nom}`, cible: "repos lancé par la montre", duree: a.repos, fin, restant: null,
            mode: "repos", impose: true, appli: true, appui: a.id };
   if (ts != null) { minu.debut = ts; reposDuLot = minu; }
+  // Une fin déjà passée a sonné à la montre : pas une seconde fois ici (prolongé par +15, il sonnera à sa fin).
   if (effort && !a.ech && a.jour === jour) {
     const { e, mode, ci } = lignesDe(a.nom), i = e?.series?.findIndex((x) => x.m === a.id) ?? -1;
     if (mode === "charge" && i >= 0) minu.effort = { nom: a.nom, i, vise: ci?.r ?? schemaDe(a.nom).reps };
   }
-  sonne = false; garder();
+  sonne = fin <= Date.now(); garder();
 }
 
 // Une ligne du journal de la carte « Valider depuis la montre » (même format que sw.js : 12 dernières). Les
@@ -2289,7 +2292,9 @@ function majRepos() {
   boutons(`<button data-min="pause">${minu.restant != null ? "▶ Reprendre" : "⏸ Pause"}</button>`
     + `<button data-min="-15">−15 s</button><button data-min="15">+15 s</button>`
     + `<button data-min="stop" class="${reste <= 0 ? "fort" : ""}">${reste <= 0 ? "Go" : "Passer"}</button>`);
-  if (reste <= 0 && !sonne) {
+  // Pendant un lot de gestes de la montre (enLot), la sonnerie attend la fin du lot : une fin passée y est déjà
+  // vibrée par la montre, et le repos du lot fini est retiré après (recevoirUneFois).
+  if (reste <= 0 && !sonne && !enLot) {
     sonne = true;
     navigator.vibrate?.([300, 150, 300, 150, 300]);
     bip();
