@@ -7,6 +7,9 @@
 //
 // Jamais de réseau : fetch rejoue `reponses`. Le temps est figé à `maintenant` ; les setTimeout attendent
 // lancerMinuteurs(), les setInterval ne partent jamais.
+//
+// Avec l'option `pont`, le contexte reçoit un faux plugin `Capacitor.Plugins.Montre` (API du « Contrat commun »
+// du plan pont), comme dans l'APK ; sans elle, pas de Capacitor : c'est Chrome.
 process.env.TZ = "Europe/Paris";
 
 import vm from "node:vm";
@@ -86,7 +89,87 @@ function cachesFactices() {
   };
 }
 
-export async function chargerCarnet({ maintenant = "2026-11-09T17:00:00+01:00", stockage = {}, reponses = {} } = {}) {
+// Copie d'un objet de la page dans le monde du test (assert.deepEqual compare aussi les prototypes, et ceux du
+// contexte node:vm ne sont pas ceux d'ici).
+const copier = (x) => (x === undefined ? undefined : JSON.parse(JSON.stringify(x)));
+
+// Faux plugin du pont. `envoyes` : les envoyer({ message, cle }) dans l'ordre ; `fins` : les programmerFin ;
+// `acquis` : les `jusqua` acquittés ; `appels` : le nom de chaque méthode appelée (« addListener:connexion »…).
+// `recevoir(message)` met un message de la montre en file (seq à partir de 1) et prévient les écouteurs
+// `messages` ; `connexion(presente)` change la présence et prévient les écouteurs `connexion`.
+// `etatDiffere` : etat() (lent dans l'APK, ~8 s) ne répond qu'à `rendreEtat()`, avec la présence de l'appel.
+function fauxPont({ presente = true, messages = [], etatDiffere = false } = {}) {
+  const ecouteurs = { messages: [], connexion: [] };
+  let seq = 0, file = [], rendre = null;
+  const pont = {
+    envoyes: [], fins: [], acquis: [], appels: [],
+    recevoir(message) {
+      file.push({ seq: ++seq, message: copier(message) });
+      for (const fn of ecouteurs.messages) fn({ dernier: seq });
+      return seq;
+    },
+    connexion(p) {
+      presente = p;
+      for (const fn of ecouteurs.connexion) fn({ presente: p });
+    },
+    vider() { pont.envoyes.length = 0; pont.fins.length = 0; },
+    rendreEtat() { rendre?.(); rendre = null; },
+  };
+  for (const m of messages) file.push({ seq: ++seq, message: copier(m) });
+  const plugin = {
+    etat() {
+      pont.appels.push("etat");
+      const x = { kit: "pret", montre: "connectee", appli: "installee", detail: "", presente, notifications: true };
+      return etatDiffere ? new Promise((ok) => { rendre = () => ok(x); }) : Promise.resolve(x);
+    },
+    envoyer(o) {   // gardé tout de suite (un test lit envoyes sans attendre), réponse en promesse
+      pont.appels.push("envoyer");
+      if (!o?.message) return Promise.resolve({ ok: false, statut: "MESSAGE_INVALIDE" });
+      pont.envoyes.push({ message: copier(o.message), cle: o.cle ?? null });
+      return Promise.resolve({ ok: true, statut: "SUCCESS" });
+    },
+    async prendreMessages() {
+      pont.appels.push("prendreMessages");
+      return { messages: copier(file), perdus: 0 };
+    },
+    async acquitter(o) {
+      pont.appels.push("acquitter");
+      if (typeof o?.jusqua !== "number") throw Object.assign(new Error("jusqua"), { code: "MESSAGE_INVALIDE" });
+      pont.acquis.push(o.jusqua);
+      const avant = file.length;
+      file = file.filter((x) => x.seq > o.jusqua);
+      return { retires: avant - file.length };
+    },
+    programmerFin(o) {
+      pont.appels.push("programmerFin");
+      pont.fins.push(copier(o));
+      return Promise.resolve({ ok: true });
+    },
+    async addListener(nom, fn) {
+      pont.appels.push(`addListener:${nom}`);
+      (ecouteurs[nom] ||= []).push(fn);
+      return { remove: async () => { ecouteurs[nom] = ecouteurs[nom].filter((x) => x !== fn); } };
+    },
+  };
+  return { pont, plugin };
+}
+
+// Le `plan` compact rebâti en étapes, par les règles de « Messages » du plan v2 : ce que fera la montre (pour
+// les tests seulement ; la montre a les siennes, testées sur le même message).
+const kgTxt = (c) => (c === 0 ? "pdc" : String(c).replace(".", ","));
+export function deplier(m) {
+  return m.e.map(([xi, k, c, r, repos, f]) => {
+    const [nom, n, pas, ss, mode] = m.x[xi], ech = !!(f & 1);
+    return {
+      id: `${m.j}|${nom}|${ech ? "e" : ""}${k}`, nom,
+      quoi: ech ? "échauffement" : `série ${k + 1}/${n}${ss ? " · superset" : ""}`,
+      txt: mode === 1 ? `${r} rép.` : mode === 2 ? `${r} s` : `${kgTxt(c)} kg × ${r}`,
+      repos, ech, k, c, r, u: f & 2 ? "s" : null, pas,
+    };
+  });
+}
+
+export async function chargerCarnet({ maintenant = "2026-11-09T17:00:00+01:00", stockage = {}, reponses = {}, pont = null } = {}) {
   const appels = [];
   const messagesSW = [];
   const minuteurs = new Map();
@@ -157,6 +240,8 @@ export async function chargerCarnet({ maintenant = "2026-11-09T17:00:00+01:00", 
     URL,
     setImmediate,
   };
+  const faux = pont ? fauxPont(pont) : null;
+  if (faux) contexte.Capacitor = { Plugins: { Montre: faux.plugin } };
 
   // Les modules importés par app.js, fournis au contexte sous les mêmes noms.
   let code = readFileSync(new URL("app.js", RACINE), "utf8");
@@ -204,6 +289,7 @@ export async function chargerCarnet({ maintenant = "2026-11-09T17:00:00+01:00", 
     },
     appels,
     messagesSW,
+    pont: faux?.pont ?? null,
     // Synchrone : le cache factice garde le texte de chaque entrée (null si le journal n'a jamais été écrit).
     journalMontre() {
       const c = caches.tous.get("carnet-montre");

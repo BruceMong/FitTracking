@@ -13,6 +13,7 @@ import { FICHES, SOINS } from "./fiches.js";
 import { pictosDe } from "./pictos.js";
 import { CORPS } from "./corps.js";
 import { verdictAppui, noterAppui, finReposAppui, clePlan } from "./montre.js";
+import { messageRepos, messagePlan, versionSuivante } from "./pont.js";
 
 const URL_API = "https://vesdcipjplvgdwfsvefq.supabase.co/rest/v1/rpc/";
 const PUBLIQUE = "sb_publishable_6sYHfOdCG9m-xAkfm8Zcwg_7F4ZKu2c";
@@ -56,6 +57,12 @@ let ctx = lire("carnet:ctx");                  // contexte poussé par le PC
 let grandPref = lire("carnet:grand", false), grandVu = false, grandEtat = "";
 // Montre : à la fin de chaque repos, une notification « Série faite » que la montre (Garmin) relaie.
 let montre = lire("carnet:montre", false);
+// Pont de l'APK (plugin Capacitor « Montre ») : absent dans Chrome, et alors rien du pont ne tourne. pontPresente :
+// l'appli montre est ouverte (etat() puis l'événement connexion) ; pontDg : dernier geste appliqué ; pontV :
+// dernière version d'état envoyée ; pontFait : l'id de la dernière étape notée depuis le dernier plan envoyé.
+const pont = window.Capacitor?.Plugins?.Montre || null;
+let pontPresente, pontDg = lire("carnet:montre-dg", 0), pontV = lire("carnet:montre-v", 0), pontFait = null;
+let pontReposVu = null, pontPlanVu = null;   // derniers repos (hors v) et plan (clePlan) envoyés
 let distantes = lire("carnet:seances", []);    // séances des 90 derniers jours, vues du serveur
 const jour = aujourdhui();
 let doc = lire(`carnet:seance:${jour}`)?.doc || null;
@@ -449,6 +456,7 @@ function dessiner() {
     programmerPublication();
   }
   dessinerPage(); majGrand(true);
+  envoyerPlanPont();
 }
 
 function dessinerPage() {
@@ -1296,7 +1304,9 @@ function noterEchauffement(nom, t = new Date().toTimeString().slice(0, 8)) {
 
 // Un échauffement fait (bouton de la carte, grand format ou montre) : repos court, sans réserve.
 function cocherEchauffement(nom) {
-  if (!noterEchauffement(nom)) return;
+  const note = noterEchauffement(nom);
+  if (!note) return;
+  pontFait = `${jour}|${nom}|e${note.l.k}`;
   // Un échauffement fait : un repos court (1 min), sans réserve à noter.
   navigator.vibrate?.(30);
   sauver();
@@ -1349,6 +1359,7 @@ function suiteApres(nom, { e, L, k0, n }) {
 function validerSerie(nom) {
   const note = noterSerie(nom);
   if (!note) return;
+  pontFait = `${jour}|${nom}|${note.k0}`;
   const { e, L, k0, n, mode, ci } = note;
   navigator.vibrate?.(30);
   sauver();
@@ -1830,6 +1841,7 @@ function prevenirSW() {
   const serie = nom ? { nom, jour, id: idSerie(nom), ech: aFaire(nom).ech, txt: cibleTxt(nom), quand: quandSerie(nom) } : null;
   navigator.serviceWorker?.controller?.postMessage({ repos: repos ? minu.fin : ss && serie ? Date.now() : null,
     quoi: [minu?.quoi, minu?.cible].filter(Boolean).join(" · "), serie, toujours: montre });
+  envoyerReposPont();
 }
 // Ce qui identifie la prochaine série d'un exercice : si elle a déjà été notée au téléphone, le bouton
 // de la montre, venu trop tard, ne la note pas une seconde fois.
@@ -1907,6 +1919,48 @@ function planMontre() {
     return { jour, v: garde.doc?.maj ?? null, etapes };
   } finally { ({ doc, saisie, minu, ouvert, choisie } = garde); }
 }
+
+// ───────────────────────────────────────── pont de l'APK
+
+// L'état pour l'appli montre, par le Bluetooth du pont (formes : plan v2, « Messages ») : le repos à heure de fin
+// absolue à chaque changement du minuteur (prevenirSW), le plan compact à chaque changement du plan (dessiner),
+// et les deux, forcés, quand la montre se connecte. Rien ne part sans pont ni montre présente. Les appels au
+// plugin attendent d'eux-mêmes le retour de la page à l'écran : aucun minuteur ici.
+function versionPont() { pontV = versionSuivante(pontV, Date.now()); ecrire("carnet:montre-v", pontV); return pontV; }
+function envoyerPont(message, cleEnvoi) {
+  // `envoyer` ne rejette que PAGE_REFUSEE (page hors de l'APK) ; son statut ne dit pas « lu » : rien n'en dépend.
+  pont.envoyer({ message, cle: cleEnvoi }).catch(() => {});
+}
+function envoyerReposPont(force = false) {
+  if (!pont || !pontPresente) return;
+  // La réserve déjà notée de la série demandée (doc, pas seanceDuJour() : aucun effet de bord ici).
+  const ef = minu?.mode === "repos" ? minu.effort : null;
+  const e = ef ? doc?.exos?.find((x) => x.nom === ef.nom)?.series?.[ef.i]?.e : null;
+  const m = messageRepos(minu, { v: 0, dg: pontDg, fait: pontFait, e }), vu = JSON.stringify(m);
+  if (!force && vu === pontReposVu) return;
+  pontReposVu = vu; m.v = versionPont();
+  envoyerPont(m, "repos");
+}
+// Pour chaque exercice du plan : nombre de séries (le N de quandSerie), superset actif, mesure.
+function exosPlan(plan) {
+  const exos = {};
+  for (const { nom } of plan.etapes) {
+    if (exos[nom]) continue;
+    const { n, L } = lignesDe(nom);
+    exos[nom] = { n: Math.max(n, L.length), ss: ssActif(nom), mode: mesureDe(nom) };
+  }
+  return exos;
+}
+function envoyerPlanPont(force = false) {
+  if (!pont || !pontPresente) return;
+  const plan = planMontre(), k = clePlan(plan);
+  if (!force && k === pontPlanVu) return;
+  pontPlanVu = k;
+  envoyerPont(messagePlan(plan, exosPlan(plan), { v: versionPont(), dg: pontDg }), "plan");
+  pontFait = null;
+}
+// L'état complet : le plan d'abord (la montre y cale ses étapes), puis le repos.
+function envoyerEtatPont() { envoyerPlanPont(true); envoyerReposPont(true); }
 
 // Publie le plan pour la montre (base : carnet_montre_publier). Seulement s'il a changé depuis la dernière
 // publication réussie (clePlan ignore v), sauf `force` : après charger(), le dernier appareil réveillé fait
@@ -2520,6 +2574,17 @@ if ("serviceWorker" in navigator) {
 // Carnet fermé quand on a touché « Série faite » sur la montre : le service worker l'a rouvert avec la série.
 { const m = location.hash.match(/^#montre=(.+)$/);
   if (m) { history.replaceState(null, "", location.pathname); try { depuisMontre(JSON.parse(decodeURIComponent(m[1]))); } catch {} } }
+// Pont de l'APK (avec ou sans clé) : l'écouteur d'abord, puis etat() (« Contrat commun » du pont : un changement
+// de présence arrivé entre les deux ne se perd pas). etat() peut prendre ~8 s : rien ne l'attend, et la présence
+// apprise entre-temps par l'événement, plus récente, l'emporte sur la sienne.
+if (pont) {
+  pont.addListener("connexion", ({ presente }) => { pontPresente = !!presente; if (pontPresente) envoyerEtatPont(); });
+  pont.etat().then((x) => {
+    if (pontPresente !== undefined) return;
+    pontPresente = !!x?.presente;
+    if (pontPresente) envoyerEtatPont();
+  }).catch(() => {});
+}
 // Le numéro de version, en bas de page : pour vérifier que le téléphone a bien la dernière.
 caches?.keys?.().then((ks) => { const v = ks.find((k) => k.startsWith("fittracking-")); if (v) $("#version").textContent = `FitTracking ${v.slice(12)}`; }).catch(() => {});
 dessiner();
