@@ -376,3 +376,59 @@ test("programmerFin rejeté : averti (console.warn), rien d'autre", async () => 
   await b.attendre();
   assert.ok(b.json("avertis").includes("fin de repos non programmée MESSAGE_INVALIDE"), b.json("avertis").join(" | "));
 });
+
+// ── Relecture finale de la branche.
+
+test("en pause, montre présente : un −15 s qui épuise le restant fait sonner le téléphone (la montre ne finira pas)", async () => {
+  const b = await chargerCarnet({ stockage: avecCtx(), pont: {} });
+  b.evaluer(`validerSerie(${q(DC)}); pauseRepos(); minu.restant = 10; garder()`); espionFin(b);
+  b.evaluer("ajusterRepos(-15)"); await b.attendre();
+  assert.deepEqual(b.json("sonneries"), ["vibre", "bip", "flash"]);
+  assert.ok(!b.pont.appels.includes("presence"));
+  assert.equal(b.pont.envoyes.filter((x) => x.cle === "repos").at(-1).message.r.p, 0);
+});
+
+test("programmerFin ok: true après une fin laissée au natif : un service arrêté plus tard ne fait pas sonner ce repos", async () => {
+  const b = await chargerCarnet({ stockage: avecCtx(), pont: { presente: false } });
+  b.evaluer(`validerSerie(${q(DC)})`); await b.attendre(); espionFin(b);
+  b.visibilite(false); b.evaluer(`Date.now = () => ${T0 + 151000}`);
+  b.visibilite(true); await b.attendre();   // le natif a notifié (ok: true)
+  assert.deepEqual(b.json("sonneries"), ["flash"]);
+  assert.equal(b.json("pontTu"), null);
+  b.visibilite(false); b.pont.finOk = false; b.visibilite(true); await b.attendre();
+  assert.deepEqual(b.json("sonneries"), ["flash"]);
+});
+
+test("programmerFin rejeté : pontFinOk passe à false (rien ne sera notifié)", async () => {
+  const b = await chargerCarnet({ stockage: avecCtx(), pont: {} });
+  b.evaluer(`globalThis.console = { ...console, warn() {} };
+    Capacitor.Plugins.Montre.programmerFin = () => Promise.reject(new Error("MESSAGE_INVALIDE"));
+    validerSerie(${q(DC)})`);
+  await b.attendre();
+  assert.equal(b.json("pontFinOk"), false);
+});
+
+test("APK plus ancienne, sans programmerFin, acquitter ni presence : rien ne plante, la page sonne comme en v1", async () => {
+  const b = await chargerCarnet({ stockage: avecCtx({ "carnet:cle": "cle-essai" }),
+    pont: { sans: ["programmerFin", "acquitter", "presence"] } }); await b.attendre();
+  b.evaluer(`globalThis.avertis = []; globalThis.console = { ...console, warn: (...a) => avertis.push(a.join(" ")) }`);
+  b.evaluer(`validerSerie(${q(DC)})`); await b.attendre(); espionFin(b);
+  assert.equal(b.json("minu.fin"), T0 + 150000);
+  // fin passée page cachée : aucune notification native possible, la page sonne au retour
+  b.visibilite(false); b.evaluer(`Date.now = () => ${T0 + 151000}`);
+  b.visibilite(true); await b.attendre();
+  assert.deepEqual(b.json("sonneries"), ["vibre", "bip", "flash"]);
+  // un geste de la montre est appliqué, sans acquittement possible
+  b.evaluer("arreterRepos()");
+  b.pont.recevoir({ type: "geste", n: 1794330342, ts: T0, g: "plus1", nom: DC }); await b.attendre(); await b.attendre();
+  assert.equal(b.json(`saisie[${q(DC)}].extra`), 1);
+  assert.ok(!b.json("avertis").some((t) => /réception de la montre/.test(t)), b.json("avertis").join(" | "));
+});
+
+test("etat() rejeté au retour à l'écran : averti (console.warn)", async () => {
+  const b = await chargerCarnet({ stockage: avecCtx(), pont: {} });
+  b.evaluer(`globalThis.avertis = []; globalThis.console = { ...console, warn: (...a) => avertis.push(a.join(" ")) };
+    Capacitor.Plugins.Montre.etat = () => Promise.reject(new Error("KIT_INDISPONIBLE"))`);
+  b.visibilite(false); b.visibilite(true); await b.attendre();
+  assert.ok(b.json("avertis").includes("état du pont non lu KIT_INDISPONIBLE"), b.json("avertis").join(" | "));
+});

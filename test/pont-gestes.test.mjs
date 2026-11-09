@@ -5,6 +5,8 @@ import assert from "node:assert/strict";
 import { chargerCarnet, deplier } from "./banc.mjs";
 import { JOUR, DC, TRI, ELE, avecCtx, enCours, appui } from "./fixtures.mjs";
 
+// Le carnet de ces essais a sa clé (fausse) : sans clé, les gestes de la montre attendent dans la file du pont.
+const avecCle = (plus = {}) => avecCtx({ "carnet:cle": "cle-essai", ...plus });
 const q = JSON.stringify;
 const ID0 = `${JOUR}|${DC}|0`, ID1 = `${JOUR}|${DC}|1`;
 const TS = appui(0).ts * 1000;   // 16:58, deux minutes avant l'heure du banc (17:00)
@@ -15,7 +17,7 @@ const series = (b) => b.json(`seanceDuJour().exos.find((e) => e.nom === ${q(DC)}
 
 // Le carnet dans l'APK, montre présente ; l'état de départ est déjà parti (vidé).
 async function carnet(plus = {}) {
-  const b = await chargerCarnet({ stockage: avecCtx(), pont: {}, ...plus });
+  const b = await chargerCarnet({ stockage: avecCle(), pont: {}, ...plus });
   await b.attendre(); b.pont.vider();
   return b;
 }
@@ -24,7 +26,7 @@ const recevoir = async (b, ...ms) => { for (const m of ms) b.pont.recevoir(m); a
 const espionToasts = (b) => b.evaluer("globalThis.toasts = []; toast = (t) => toasts.push(t)");
 
 test("appui de la montre : série telle que faite, repos calé sur l'heure du geste, réserve demandée", async () => {
-  const b = await chargerCarnet({ stockage: avecCtx(), pont: {} }); b.pont.vider();
+  const b = await chargerCarnet({ stockage: avecCle(), pont: {} }); b.pont.vider();
   b.pont.recevoir(geste(N, "appui", { a: appui(0, { c: 45, r: 5 }) })); await b.attendre();
   assert.deepEqual(b.json(`seanceDuJour().exos[0].series`), [{ c: 45, r: 5, t: "16:58:00", m: ID0 }]);
   assert.deepEqual(b.json(`[minu.fin, minu.debut, minu.appui, minu.appli]`), [TS + 150000, TS, ID0, true]);
@@ -50,7 +52,7 @@ test("geste_rejoue_apres_rechargement : appliqué une fois", async () => {
 
 test("appui_pont_puis_base : une série, pas de toast « déjà noté »", async () => {
   const etat = { appuis: [] };
-  const b = await carnet({ stockage: avecCtx({ "carnet:cle": "cle-essai" }),
+  const b = await carnet({ stockage: avecCle(),
     reponses: { carnet_montre_appuis: () => etat.appuis } });
   espionToasts(b);
   await recevoir(b, geste(N, "appui", { a: appui(0) }));
@@ -75,7 +77,7 @@ test("le repos part de l'heure du geste (ts, en ms), pas de celle de l'appui", a
 });
 
 test("premier_appui_hors_ligne : lecture du serveur ratée, aucune séance ici : noté quand même", async () => {
-  const b = await carnet({ stockage: avecCtx({ "carnet:cle": "cle-essai" }),
+  const b = await carnet({ stockage: avecCle(),
     reponses: { carnet_lire: () => { throw { status: 503, message: "indisponible" }; } } });
   assert.equal(b.json("luServeur"), false);
   await recevoir(b, geste(N, "appui", { a: appui(0) }));
@@ -138,7 +140,7 @@ test("réserve après un appui : @N sur la série, le repos renvoyé le porte", 
 });
 
 test("+ une série : le plan renvoyé a une étape de plus", async () => {
-  const b = await chargerCarnet({ stockage: avecCtx(), pont: {} }); await b.attendre();
+  const b = await chargerCarnet({ stockage: avecCle(), pont: {} }); await b.attendre();
   const avant = dernier(b, "plan");
   assert.deepEqual([avant.e.length, avant.x[0][1]], [10, 4]);
   b.pont.vider();
@@ -246,7 +248,7 @@ test("une réception à la fois : un appel pendant une réception la relance une
 });
 
 test("démarrage : les écouteurs messages et connexion avant etat() et prendreMessages()", async () => {
-  const b = await chargerCarnet({ stockage: avecCtx(), pont: { messages: [geste(N, "plus1", { nom: DC })] } });
+  const b = await chargerCarnet({ stockage: avecCle(), pont: { messages: [geste(N, "plus1", { nom: DC })] } });
   await b.attendre();
   const a = b.pont.appels;
   assert.ok(a.indexOf("addListener:messages") >= 0);
@@ -258,7 +260,7 @@ test("démarrage : les écouteurs messages et connexion avant etat() et prendreM
 
 test("la réception attend la lecture du serveur en cours (au plus 3 s)", async () => {
   let rendre;
-  const b = await chargerCarnet({ stockage: avecCtx({ "carnet:cle": "cle-essai" }), pont: {},
+  const b = await chargerCarnet({ stockage: avecCle(), pont: {},
     reponses: { carnet_lire: () => new Promise((ok) => { rendre = () => ok({ contexte: null, seances: [] }); }) } });
   await b.attendre();
   await recevoir(b, geste(N, "appui", { a: appui(0) }));
@@ -276,7 +278,7 @@ test("la réception attend la lecture du serveur en cours (au plus 3 s)", async 
 // ── Décisions du contrôleur (relecture de la tâche 4).
 
 test("route de la base : le repos lancé par l'appui porte son id, annulerAppui l'arrête", async () => {
-  const b = await chargerCarnet({ stockage: avecCtx({ "carnet:cle": "cle-essai" }),
+  const b = await chargerCarnet({ stockage: avecCle(),
     reponses: { carnet_montre_appuis: () => [{ id: 7, appui: appui(0), recu: "2026-11-09T15:58:01Z" }] } });
   await b.attendre();
   assert.equal(b.json("minu.appui"), ID0);
@@ -307,7 +309,7 @@ test("annuler ne vise que le dernier appui noté de son exercice", async () => {
 
 test("appui annulé rendu plus tard par la base : pas noté ; la série refaite (même id, autre ts) l'est", async () => {
   const etat = { appuis: [] };
-  const b = await carnet({ stockage: avecCtx({ "carnet:cle": "cle-essai" }),
+  const b = await carnet({ stockage: avecCle(),
     reponses: { carnet_montre_appuis: () => etat.appuis } });
   await recevoir(b, geste(N, "appui", { a: appui(0) }), geste(N + 1, "annuler", { id: ID0 }));
   assert.deepEqual(series(b), []);
@@ -327,7 +329,7 @@ test("appui annulé rendu plus tard par la base : pas noté ; la série refaite 
 });
 
 test("les annulations des jours passés sont effacées, comme les autres clés du jour", async () => {
-  const b = await chargerCarnet({ stockage: avecCtx({
+  const b = await chargerCarnet({ stockage: avecCle({
     "carnet:montre-annules:2026-11-08": [{ id: `2026-11-08|${DC}|0`, ts: 1 }],
     "carnet:montre-notes:2026-11-08": { [`2026-11-08|${DC}|0`]: 1 },
     "carnet:montre-annules:2026-11-09": [{ id: ID0, ts: 1 }] }), pont: {} });
@@ -356,7 +358,7 @@ test("après annulerAppui : état complet renvoyé, fait remis à null s'il visa
 });
 
 test("sans pont (Chrome) : ni écouteur, ni réception, rien d'écrit pour la montre", async () => {
-  const b = await chargerCarnet({ stockage: avecCtx({ "carnet:cle": "cle-essai" }),
+  const b = await chargerCarnet({ stockage: avecCle(),
     reponses: { carnet_montre_appuis: () => [{ id: 7, appui: appui(0), recu: "2026-11-09T15:58:01Z" }] } });
   await b.attendre();
   assert.equal(series(b).length, 1);
@@ -385,7 +387,7 @@ test("gestes en lot : un repos encore fini après le lot est retiré (appui tard
   assert.deepEqual([dernier(b, "repos").dg, dernier(b, "repos").r], [N + 1, null]);
   // la dernière série de DC : c'est TRI qui s'ouvre, comme à la fin de ce repos
   const d = await carnet({ maintenant: new Date(TS + 200000).toISOString(),
-    stockage: avecCtx(enCours([0, 1, 2].map(() => ({ c: 42.5, r: 6, t: "16:50:00" })))) });
+    stockage: avecCle(enCours([0, 1, 2].map(() => ({ c: 42.5, r: 6, t: "16:50:00" })))) });
   await recevoir(d, geste(N, "appui", { a: appui(3) }));
   assert.deepEqual(d.json("[minu, ouvert]"), [null, TRI]);
   // en pause : gardé (le repos attend la reprise)
@@ -417,7 +419,8 @@ test("exo pendant un repos qui court : ignoré, l'état complet repart", async (
 });
 
 test("appui d'un autre jour en attente : averti, acquitté (la base le rattrapera)", async () => {
-  const b = await carnet();
+  // lecture du serveur ratée : l'autre jour n'est pas sûr ici
+  const b = await carnet({ reponses: { carnet_lire: () => { throw { status: 503, message: "indisponible" }; } } });
   b.evaluer(`globalThis.avertis = []; globalThis.console = { ...console, warn: (...a) => avertis.push(a.join(" ")) };`);
   const hier = appui(0, { id: `2026-11-08|${DC}|0`, jour: "2026-11-08", ts: Date.parse("2026-11-08T18:00:00+01:00") / 1000 });
   await recevoir(b, geste(N, "appui", { a: hier }));
@@ -485,4 +488,71 @@ test("un geste qui lève puis un sauver() qui lève : le lot continue, acquitté
   assert.equal(b.json("pontDg"), N + 1);
   assert.deepEqual(b.pont.acquis, [2]);
   assert.equal(dernier(b, "plan").x[0][1], 5);   // plus1 appliqué, plan redessiné et renvoyé
+});
+
+// ── Relecture finale de la branche.
+
+test("sans clé : les gestes attendent dans la file du pont ; la clé collée, ils sont appliqués et acquittés", async () => {
+  const b = await chargerCarnet({ stockage: avecCtx(), pont: {} }); await b.attendre();
+  await recevoir(b, geste(N, "appui", { a: appui(0) }));
+  assert.equal(series(b).length, 0);
+  assert.deepEqual(b.pont.acquis, []);
+  assert.ok(!b.pont.appels.includes("prendreMessages"));
+  assert.equal(b.json(`collerCle("abcdefghijklmnopqrstu")`), true);
+  await b.attendre(); await b.attendre();
+  assert.equal(series(b).length, 1);
+  assert.deepEqual(b.pont.acquis, [1]);
+});
+
+test("annuler un échauffement de la montre : il revient dans le plan", async () => {
+  const IDE = `${JOUR}|${DC}|e0`;
+  const b = await carnet({ stockage: avecCle({ "carnet:saisie:2026-11-09": { [DC]: { edits: {}, extra: 0, ech: 1, echEdits: {} } } }) });
+  await recevoir(b, geste(N, "appui", { a: appui(0, { id: IDE, ech: true, c: 20, r: 10, quand: "échauffement", repos: 60 }) }));
+  assert.equal(b.json(`saisie[${q(DC)}].ech`), 0);
+  await recevoir(b, geste(N + 1, "annuler", { id: IDE }));
+  assert.equal(b.json(`saisie[${q(DC)}].ech`), 1);
+  assert.equal(b.json(`lignesDe(${q(DC)}).W.filter((x) => !x.fait).length`), 1);
+  assert.equal(deplier(dernier(b, "plan"))[0].id, IDE);
+});
+
+test("annuler la série d'un « + une série » : la ligne en plus revient", async () => {
+  const quatre = [0, 1, 2, 3].map(() => ({ c: 42.5, r: 6, t: "16:50:00" }));
+  const b = await carnet({ stockage: avecCle(enCours(quatre)) });
+  await recevoir(b, geste(N, "plus1", { nom: DC }), geste(N + 1, "appui", { a: appui(4, { quand: "série 5/4" }) }));
+  assert.equal(series(b).length, 5);
+  assert.equal(b.json(`saisie[${q(DC)}].extra`), 0);
+  await recevoir(b, geste(N + 2, "annuler", { id: `${JOUR}|${DC}|4` }));
+  assert.equal(series(b).length, 4);
+  assert.deepEqual(b.json(`lignesDe(${q(DC)}).L.filter((x) => !x.fait).map((x) => x.k)`), [4]);
+});
+
+test("charge réglée à la montre, série faite puis annulée : la ligne prévue garde cette charge", async () => {
+  const b = await carnet();
+  await recevoir(b, geste(N, "regler", { nom: DC, k: 0, ech: false, champ: "c", v: 45 }),
+    geste(N + 1, "appui", { a: appui(0, { c: 45 }) }));
+  assert.deepEqual(series(b).map((s) => s.c), [45]);
+  await recevoir(b, geste(N + 2, "annuler", { id: ID0 }));
+  assert.deepEqual(b.json(`lignesDe(${q(DC)}).L.filter((x) => !x.fait).map((x) => [x.k, x.c])`),
+    [[0, 45], [1, 45], [2, 45], [3, 45]]);
+  assert.deepEqual(deplier(dernier(b, "plan"))[0].c, 45);
+});
+
+test("pause (ts à virgule) puis reprise à la montre : la fin reste un nombre entier de millisecondes", async () => {
+  const b = await carnet();
+  // lireGeste admet un ts fini quelconque : 148 999,25 ms, le restant vaut 1,00075 s
+  await recevoir(b, geste(N, "appui", { a: appui(0) }),
+    { ...geste(N + 1, "pause"), ts: TS + 148999.25 }, { ...geste(N + 2, "reprendre"), ts: TS + 150000 });
+  assert.equal(b.json("minu.restant"), null);
+  assert.ok(Number.isInteger(b.json("minu.fin")), String(b.json("minu.fin")));
+  assert.equal(b.json("minu.fin"), TS + 151001);
+  assert.ok(Number.isInteger(dernier(b, "repos").r.fin));
+});
+
+test("exo sur l'écran de fin d'exercice (mode fin) : passer puis changer d'exercice, comme « fini »", async () => {
+  const b = await carnet();
+  b.evaluer(`finExercice(${q(DC)})`);
+  assert.deepEqual(b.json("[etatGrand(), exoGrand()]"), ["fin", DC]);
+  assert.equal(b.json(`appliquerGeste(${q(geste(N, "exo", { nom: DC, sens: 1 }))})`), "applique");
+  assert.equal(b.json("minu"), null);
+  assert.equal(b.json("exoGrand()"), TRI);
 });

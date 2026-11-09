@@ -35,13 +35,14 @@ export function lireGeste(m) {
 /** Version d'état strictement croissante, même si l'horloge est figée ou reculée. */
 export const versionSuivante = (derniere, maintenant) => Math.max(maintenant, (derniere || 0) + 1);
 
-/** Le message `repos` ; `r` est null hors d'un repos. */
+/** Le message `repos` ; `r` est null hors d'un repos. `p`, le restant figé en pause (ms), jamais négatif : un −15 s
+ *  qui épuise la pause part à 0 (illisible à la montre sinon). */
 export function messageRepos(minu, { v, dg, fait, e }) {
   let r = null;
   if (minu?.mode === "repos") {
     const ef = minu.effort ? { nom: minu.effort.nom, k: minu.effort.i, e: e ?? null } : null;
     r = { id: minu.debut ?? minu.fin - minu.duree * 1000, fin: minu.fin, duree: minu.duree,
-      p: minu.restant == null ? null : Math.round(minu.restant * 1000), nom: minu.nom, ef };
+      p: minu.restant == null ? null : Math.max(0, Math.round(minu.restant * 1000)), nom: minu.nom, ef };
   }
   return { type: "repos", v, dg, fait, r };
 }

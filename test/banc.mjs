@@ -101,8 +101,8 @@ const copier = (x) => (x === undefined ? undefined : JSON.parse(JSON.stringify(x
 // Réglables en cours de test, sur `pont` : `finOk` (réponse de programmerFin : false = service arrêté),
 // `notifications` (celle d'etat()), `presenteFin` (celle de presence() ; null : suit `presente`), `presenceRejet`
 // (presence() rejetée), `presenceBloquee` (presence() ne répond qu'à `rendrePresence()`). `presence: false` : pas de presence()
-// (APK d'avant).
-function fauxPont({ presente = true, messages = [], etatDiffere = false, presence = true, notifications = true } = {}) {
+// (APK d'avant). `sans` : les méthodes du plugin retirées (APK plus ancienne), par exemple ["programmerFin", "acquitter"].
+function fauxPont({ presente = true, messages = [], etatDiffere = false, presence = true, notifications = true, sans = [] } = {}) {
   const ecouteurs = { messages: [], connexion: [] };
   let seq = 0, file = [], rendre = null, rendreP = null;
   const pont = {
@@ -164,6 +164,7 @@ function fauxPont({ presente = true, messages = [], etatDiffere = false, presenc
     if (pont.presenceRejet) return Promise.reject(Object.assign(new Error("presence"), { code: "ERREUR" }));
     return Promise.resolve({ presente, presenteFin: pont.presenteFin ?? presente });
   };
+  for (const nom of sans) delete plugin[nom];
   return { pont, plugin };
 }
 

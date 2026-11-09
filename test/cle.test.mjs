@@ -54,3 +54,15 @@ test("accueil sans clé : le champ n'existe que dans l'APK", async () => {
   assert.doesNotMatch(v1, /cle-collee|data-cle-coller|password/);
   assert.match(v1, /carnet-sync --lien/);
 });
+
+test("collerCle refusée : l'accueil dit pourquoi ; acceptée ensuite : le message tombe", async () => {
+  const b = await chargerCarnet({ pont: {} });
+  const MSG = `<p class="erreur">Clé invalide : 16 caractères au moins, sans espace</p>`;
+  assert.ok(!b.json("accueilSansCle()").includes(MSG));
+  assert.equal(b.json(`collerCle("court")`), false);
+  assert.ok(b.json("accueilSansCle()").includes(MSG));
+  assert.equal(b.json(`collerCle(${JSON.stringify(CLE)})`), true);
+  await b.attendre();
+  b.evaluer("cle = null");
+  assert.ok(!b.json("accueilSansCle()").includes(MSG));
+});

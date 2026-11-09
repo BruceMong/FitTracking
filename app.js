@@ -40,20 +40,23 @@ if (location.hash.startsWith("#cle=")) {
 
 // Dans l'APK, pas de lien « #cle=… » à scanner : le champ « coller la clé » la reçoit. Le format exact n'est pas
 // vérifié ici (le serveur juge) : ni vide, ni espace dedans, ni moins de 16 caractères. cleRefusee : le serveur
-// a rejeté la clé (28000), l'accueil le dit. La clé n'est jamais écrite dans la console.
-let cleRefusee = false;
+// a rejeté la clé (28000), l'accueil le dit ; cleInvalide : le texte collé n'a pas la forme d'une clé, l'accueil le
+// dit aussi. La clé n'est jamais écrite dans la console. Acceptée : les gestes de la montre restés dans la file du
+// pont faute de clé sont reçus (recevoirPont).
+let cleRefusee = false, cleInvalide = false;
 function collerCle(texte) {
   const t = String(texte ?? "").trim();
-  if (t.length < 16 || /\s/.test(t)) return false;
-  cle = t; cleRefusee = false;
+  if (t.length < 16 || /\s/.test(t)) { cleInvalide = true; dessiner(); return false; }
+  cle = t; cleRefusee = false; cleInvalide = false;
   ecrire("carnet:cle", cle);
-  dessiner(); charger();
+  dessiner(); charger(); recevoirPont();
   return true;
 }
 function accueilSansCle() {
   if (!pont) return `<div class="accueil"><p>Pas encore de clé.</p><p>Sur le PC : <b>carnet-sync --lien</b>,
       puis scanne le QR code avec ce téléphone.</p></div>`;
-  return `<div class="accueil"><p>Pas encore de clé.</p>${cleRefusee ? `<p class="erreur">Clé refusée par le serveur</p>` : ""}
+  return `<div class="accueil"><p>Pas encore de clé.</p>${cleRefusee ? `<p class="erreur">Clé refusée par le serveur</p>` : ""}${
+      cleInvalide ? `<p class="erreur">Clé invalide : 16 caractères au moins, sans espace</p>` : ""}
     <p>Sur le PC : <b>carnet-sync --lien</b>, puis colle ici la clé.</p>
     <input id="cle-collee" type="password" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="Clé du carnet">
     <button data-cle-coller>Enregistrer la clé</button></div>`;
@@ -1877,16 +1880,21 @@ function prevenirSW() {
 // l'échéance, le pont la montre si l'appli montre est absente et la page cachée. Repos de la montre compris (le
 // pont juge sa présence à l'échéance). En pause, fini ou sans repos : null, l'ancienne fin est annulée. La fin
 // programmée meurt avec le service : redonnée au démarrage et à chaque retour à l'écran.
+// APK plus ancienne, sans programmerFin : aucune fin native, la page sonne comme en v1 (pontFinOk à false). Un
+// rejet de même : rien ne sera notifié.
 function programmerFinPont() {
   if (!pont) return;
+  if (typeof pont.programmerFin !== "function") { pontFinOk = false; return; }
   const fin = minu?.mode === "repos" && minu.restant == null && minu.fin > Date.now() ? minu.fin : null;
   pont.programmerFin({ fin, titre: "Repos terminé", texte: [minu?.quoi, minu?.cible].filter(Boolean).join(" · ") })
     .then((x) => {
       pontFinOk = x?.ok !== false;
+      // Service en marche : la fin laissée au natif a été notifiée, ce repos ne sonnera plus ici.
+      if (pontFinOk) pontTu = null;
       // Service arrêté page cachée (« Arrêter » de sa notification) : la réponse du retour à l'écran le dit, après
       // le majRepos qui avait laissé la fin au natif. Rien n'a été notifié : la page sonne, comme en v1.
       if (!pontFinOk && pontTu && pontTu === minu && !document.hidden) { pontTu = null; sonnerFin(); }
-    }, (e) => console.warn("fin de repos non programmée", e?.message));
+    }, (e) => { pontFinOk = false; console.warn("fin de repos non programmée", e?.message); });
 }
 // etat().notifications, au démarrage et à chaque retour à l'écran.
 function lireNotifsPont(x) {
@@ -2063,14 +2071,14 @@ function appliquerGeste(brut) {
     case "exo": {
       // Seulement si le carnet propose le même exercice que la montre, et hors enchaînement de superset (pas de
       // flèches au grand format). Un repos qui court encore ici : la montre, qui n'en a plus, est recalée (état
-      // complet). Repos fini qui attend « Go » : « Go » puis la flèche, comme au téléphone. Sans effet visible :
-      // ignoré.
+      // complet). Repos fini qui attend « Go », ou écran de fin d'exercice (mode "fin") : « Go » puis la flèche,
+      // comme au téléphone. Sans effet visible : ignoré.
       if (minu?.mode === "superset") break;
       const etat = etatGrand();
       if (etat === "repos") { envoyerEtatPont(); break; }
       const avant = exoGrand();
       if (avant !== m.nom) break;
-      if (etat === "fini") { passerRepos(); changerExo(m.sens); fait = true; break; }
+      if (etat === "fini" || etat === "fin") { passerRepos(); changerExo(m.sens); fait = true; break; }
       const garde = [ouvert, choisie];
       if (changerExo(m.sens) && exoGrand() !== avant) fait = true;
       else [ouvert, choisie] = garde;
@@ -2081,7 +2089,8 @@ function appliquerGeste(brut) {
 }
 
 // Les messages de la montre gardés par le pont (prendreMessages, sans les retirer), appliqués dans l'ordre puis
-// acquittés jusqu'au dernier seq rendu. Une réception à la fois : un appel pendant une réception la relance une
+// acquittés jusqu'au dernier seq rendu. Sans clé, rien n'est pris : ils attendent dans la file du pont que la clé
+// soit collée (collerCle relance la réception). Une réception à la fois : un appel pendant une réception la relance une
 // fois à la fin. La lecture du serveur en cours (charger) est attendue au plus 3 s : un appui s'ajoute à la
 // séance accordée au serveur, mais sans réseau la salle n'attend pas. `bonjour` (appli montre ouverte) : l'état
 // complet repart, même inchangé (envoyé appli fermée, il a pu se perdre). Un geste qui lève est écarté (il
@@ -2106,6 +2115,7 @@ async function recevoirUneFois() {
   let delai;
   await Promise.race([apresLecture(), new Promise((ok) => { delai = setTimeout(ok, 3000); })]);
   clearTimeout(delai);
+  if (!cle) return;
   let messages;
   try { messages = (await pont.prendreMessages())?.messages || []; }
   catch (e) { console.warn("messages de la montre non lus", e?.message); return; }
@@ -2134,7 +2144,8 @@ async function recevoirUneFois() {
     if (pontDg !== dg) envoyerReposPont();
     if (agi) dessiner();
   } finally {
-    await pont.acquitter({ jusqua: messages.at(-1).seq }).catch((e) => console.warn("acquittement refusé", e?.message));
+    // acquitter absent (APK plus ancienne) : rien d'acquitté, la garde de dg écarte les gestes rendus de nouveau.
+    await pont.acquitter?.({ jusqua: messages.at(-1).seq }).catch((e) => console.warn("acquittement refusé", e?.message));
   }
 }
 
@@ -2350,12 +2361,13 @@ function majRepos() {
   // sonnée, sans sonner : le téléphone ne sonne pas une seconde fois au déverrouillage. Sauf si le natif n'a pas pu
   // notifier : service arrêté (pontFinOk), ou notifications refusées et montre absente : la page sonne, comme en v1.
   // Page à l'écran, montre présente : le pont dit si elle l'est pour la fin (sonnerSiMontreAbsente). En pause, la
-  // fin est figée (restant) : rien n'a été programmé, comme en v1.
+  // fin est figée (restant) : rien n'a été programmé, comme en v1, et la montre ne finit jamais un repos en pause
+  // (un −15 s qui épuise la pause) : le téléphone sonne toujours.
   if (reste <= 0 && !sonne && !enLot) {
     sonne = true;
     const cachee = pont && minu.restant == null && (document.hidden || minu.fin < pontVisibleA);
     if (cachee && pontFinOk && (pontNotifs || pontPresente)) pontTu = minu;
-    else if (pont && pontPresente && !cachee) sonnerSiMontreAbsente();
+    else if (pont && pontPresente && !cachee && minu.restant == null) sonnerSiMontreAbsente();
     else sonnerFin();
     // L'écran clignote aussi : en salle, le bip se perd dans la musique.
     const f = $("#flash"); f.classList.remove("on"); void f.offsetWidth; f.classList.add("on");
@@ -2435,7 +2447,7 @@ function pauseRepos(t = Date.now()) {
 }
 function reprendreRepos(t = Date.now()) {
   if (minu?.mode !== "repos" || minu.restant == null) return false;
-  minu.fin = t + minu.restant * 1000; minu.restant = null;
+  minu.fin = Math.round(t + minu.restant * 1000); minu.restant = null;   // en ms entières (le restant est à virgule)
   garder(); return true;
 }
 // « Go » / « Passer » / « Sans repos » du grand format : le repos s'arrête, l'exercice proposé s'ouvre.
@@ -2483,7 +2495,10 @@ function dernierAppui(id) {
 }
 // Un appui de l'appli montre annulé : la série (ou l'échauffement) qu'il a notée est retirée de la séance du
 // jour, les réglages des lignes suivantes décalés comme retirerSerie, l'exercice resté vide retiré, et le repos
-// lancé par cet appui arrêté. L'appui annulé (id et ts) est gardé pour la journée : rendu plus tard par la base,
+// lancé par cet appui arrêté. La ligne prévue que l'appui avait consommée (appliquerAppui) revient au plan :
+// l'échauffement prévu (st.ech), la série en plus (st.extra) et la charge réglée (st.edits, la série retirée
+// telle qu'elle était, si c'était la dernière de l'exercice : les lignes prévues gardent alors leur rang, sans
+// décalage). L'appui annulé (id et ts) est gardé pour la journée : rendu plus tard par la base,
 // il n'est pas noté ; la série refaite (même id, autre ts) l'est. Puis l'état complet repart à la montre (plan
 // forcé), `fait` remis à null avant tout envoi s'il visait cet appui. Le geste « annuler » de la montre n'y
 // arrive que pour le dernier appui noté de l'exercice (dernierAppui).
@@ -2493,11 +2508,14 @@ function annulerAppui(id) {
   const s = seanceDuJour(), { e, ech, l, i } = x;
   if (pontFait === id) pontFait = null;
   if (pont) ecrire(ANNULES, [...lire(ANNULES, []), { id, ts: lire(NOTES, {})[id] ?? null }]);
-  l.splice(i, 1);
+  const [ligne] = l.splice(i, 1);
   let effort = false;
-  if (ech) { lignesDe(e.nom).st.echEdits = {}; if (!e.ech.length) delete e.ech; }   // comme le × d'un échauffement
+  const { st, n } = lignesDe(e.nom);
+  if (ech) { st.echEdits = {}; st.ech++; if (!e.ech.length) delete e.ech; }   // comme le × d'un échauffement
   else {
-    decaler(e.nom, i, -1);
+    if (e.series.length >= n) st.extra++;   // la série en plus qu'il avait faite est de nouveau à faire
+    // Une série notée ensuite au téléphone : décalé comme retirerSerie. Sinon, la ligne prévue de son rang revient.
+    if (i < e.series.length) decaler(e.nom, i, -1); else st.edits[i] = { c: ligne.c, r: ligne.r };
     // La réserve demandée suit sa série ; si c'est celle-ci, la question tombe.
     const ef = minu?.effort;
     if (ef?.nom === e.nom && ef.i >= i) { effort = true; if (ef.i === i) delete minu.effort; else ef.i--; }
@@ -2868,7 +2886,8 @@ window.addEventListener("online", synchroniser);
 // faits page cachée (repos calé sur leur ts), puis l'état complet (les appels au pont restaient en attente).
 document.addEventListener("visibilitychange", () => { if (!document.hidden) { pontVisibleA = Date.now();
   charger(); relireMontre(); if (minu) { garder(); ecranAllume(); } else programmerFinPont();
-  if (pont) { pont.etat().then(lireNotifsPont).catch(() => {}); recevoirPont().then(envoyerEtatPont); } } });
+  if (pont) { pont.etat().then(lireNotifsPont).catch((e) => console.warn("état du pont non lu", e?.message));
+    recevoirPont().then(envoyerEtatPont); } } });
 if (minu) garder(); else programmerFinPont();
 if ("serviceWorker" in navigator) {
   navigator.serviceWorker.register("sw.js");

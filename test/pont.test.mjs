@@ -102,3 +102,9 @@ test("messagePlan : exercice absent de exos, erreur claire", () => {
   const plan = { jour: J, v: null, etapes: [{ id: "i", nom: DC, quoi: "q", txt: "t", repos: 60, ech: false, k: 0, c: 1, r: 1, u: null, pas: 0 }] };
   assert.throws(() => messagePlan(plan, {}, { v: 1, dg: 0 }), (e) => e instanceof Error && !(e instanceof TypeError) && e.message.includes(DC) && /manque/.test(e.message));
 });
+
+test("messageRepos : un restant épuisé en pause (−15 s) part à 0, jamais négatif", () => {
+  const minu = { mode: "repos", nom: DC, duree: 150, fin: TS + 150000, debut: TS, restant: -5 };
+  assert.equal(messageRepos(minu, { v: 1, dg: 0, fait: null }).r.p, 0);
+  assert.equal(messageRepos({ ...minu, restant: -0.0004 }, { v: 1, dg: 0, fait: null }).r.p, 0);
+});
