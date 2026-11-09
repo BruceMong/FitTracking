@@ -133,3 +133,45 @@ test("réserve notée pendant le repos : le repos repart avec e", async () => {
   b.evaluer(`seanceDuJour().exos.find((e) => e.nom === ${q(DC)}).series[0].e = 3; sauver(); garder()`);
   assert.deepEqual(b.pont.envoyes.map((x) => [x.cle, x.message.r?.ef]), [["repos", { nom: DC, k: 0, e: 3 }]]);
 });
+
+// Les boutons de la barre du minuteur (data-min) ne passent pas par dessiner() : le plan doit suivre quand même.
+const clicMin = (a) => `clicMinuteur({ target: { closest: (s) => s === "[data-min]" ? { dataset: { min: ${q(a)} } } : null } })`;
+
+test("« Sans superset » : le plan repart, bit superset à 0 et chaque exercice seul", async () => {
+  const b = await chargerCarnet({ stockage: avecCtx(), pont: {} });
+  b.evaluer(`validerSerie(${q(TRI)}); dessiner()`); b.pont.vider();   // superset : enchaîne les élévations
+  b.evaluer(clicMin("repos-seul"));
+  const plans = b.pont.envoyes.filter((x) => x.cle === "plan");
+  assert.equal(plans.length, 1);
+  const m = plans[0].message;
+  assert.deepEqual(m.x.filter((x) => x[0] !== DC).map((x) => [x[0], x[3]]), [[TRI, 0], [ELE, 0]]);
+  assert.deepEqual(deplier(m), b.json("planMontre().etapes"));
+});
+
+test("« OK » pendant le repos d'un superset : le plan repart, sa première étape a changé", async () => {
+  const b = await chargerCarnet({ stockage: avecCtx(), pont: {} });
+  b.evaluer(`validerSerie(${q(TRI)}); validerSerie(${q(ELE)}); dessiner()`);
+  const avant = b.pont.envoyes.filter((x) => x.cle === "plan").at(-1).message;
+  b.pont.vider();
+  b.evaluer(clicMin("stop"));
+  const plans = b.pont.envoyes.filter((x) => x.cle === "plan");
+  assert.equal(plans.length, 1);
+  assert.notEqual(deplier(plans[0].message)[0].id, deplier(avant)[0].id);
+  assert.equal(deplier(plans[0].message)[0].id, b.json("planMontre().etapes[0].id"));
+});
+
+test("plan compact rebâti à l'identique : « + une série », et superset aux nombres de séries différents", async () => {
+  // + une série : le N de « série k/N » passe à 5, jusqu'à la dernière
+  const b = await chargerCarnet({ stockage: avecCtx(), pont: {} });
+  b.evaluer(`lignesDe(${q(DC)}).st.extra++; dessiner()`);
+  const m = b.pont.envoyes.filter((x) => x.cle === "plan").at(-1).message;
+  assert.deepEqual(m.x[0].slice(0, 2), [DC, 5]);
+  assert.deepEqual(deplier(m), b.json("planMontre().etapes"));
+  assert.equal(deplier(m)[4].quoi, "série 5/5");
+  // superset 3 + 4 séries : la dernière série des élévations se fait seule
+  const ctx = { ...ctxPush, exercices: ctxPush.exercices.map((x) => (x.nom === ELE ? { ...x, schema: { series: 4, reps: 12 } } : x)) };
+  const b2 = await chargerCarnet({ stockage: { "carnet:ctx": ctx }, pont: {} });
+  const m2 = b2.pont.envoyes.filter((x) => x.cle === "plan").at(-1).message;
+  assert.deepEqual(m2.x.map((x) => x.slice(0, 2)), [[DC, 4], [TRI, 3], [ELE, 4]]);
+  assert.deepEqual(deplier(m2), b2.json("planMontre().etapes"));
+});

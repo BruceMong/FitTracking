@@ -1827,7 +1827,8 @@ function garder() {
   if (grandPref && minu) montrerGrand();   // le mode choisi reste : chaque repos s'ouvre en grand
   majRepos(); majGrand(true); prevenirSW();
 }
-function arreterRepos() { minu = null; localStorage.removeItem("carnet:minuteur"); clearInterval(tic); $("#minuteur").className = "minuteur"; prevenirSW(); majGrand(true); }
+// Le plan aussi : exoGrand dépend de minu (« OK », « Passer », arrêt de fin d'exercice ne passent pas par dessiner).
+function arreterRepos() { minu = null; localStorage.removeItem("carnet:minuteur"); clearInterval(tic); $("#minuteur").className = "minuteur"; prevenirSW(); majGrand(true); envoyerPlanPont(); }
 // La fin du repos en notification, pour qui passe sur une autre appli entre deux séries : la page en
 // arrière-plan ne sonne plus, le service worker si (Chrome le garde en vie jusqu'à 5 min). Sans serveur.
 // Chaque changement du minuteur (pause, ±15 s, Passer) remplace ou annule la fin annoncée.
@@ -2216,7 +2217,8 @@ function clicMinuteur(ev) {
   if (a === "repos-seul") {   // débrancher le superset pour la séance et faire un repos normal
     const from = minu.ssFrom, partner = minu.nom;
     if (from && partner) couperSuperset(from, partner, true);
-    return lancerRepos(from || partner, `${from || partner} · repos`, "");
+    lancerRepos(from || partner, `${from || partner} · repos`, "");
+    return envoyerPlanPont();   // ssOff a changé : bit superset et ordre des étapes (pas de dessiner() ici)
   }
   if (a === "repos2" || a === "repos1") {
     minu = { ...minu, mode: "repos", quoi: `Repos avant l'exercice suivant`, cible: "", duree: a === "repos2" ? 120 : 90, debut: Date.now() };
