@@ -13,7 +13,7 @@ import { FICHES, SOINS } from "./fiches.js";
 import { pictosDe } from "./pictos.js";
 import { CORPS } from "./corps.js";
 import { verdictAppui, noterAppui, finReposAppui, clePlan } from "./montre.js";
-import { messageRepos, messagePlan, versionSuivante } from "./pont.js";
+import { lireGeste, messageRepos, messagePlan, versionSuivante } from "./pont.js";
 
 const URL_API = "https://vesdcipjplvgdwfsvefq.supabase.co/rest/v1/rpc/";
 const PUBLIQUE = "sb_publishable_6sYHfOdCG9m-xAkfm8Zcwg_7F4ZKu2c";
@@ -125,7 +125,9 @@ const SS_OFF = `carnet:ss-off:${jour}`;
 const ssOff = new Set(lire(SS_OFF, []));
 // Valeurs vues au dernier dessiner() : la saisie et les paires coupées changent le plan de la montre.
 let saisieVue = JSON.stringify(saisie), ssOffVu = JSON.stringify([...ssOff]), exoGrandVu;
-try { for (const k of Object.keys(localStorage)) if ((k.startsWith("carnet:ss-off:") && k !== SS_OFF) || (k.startsWith("carnet:saisie:") && k !== `carnet:saisie:${jour}`)) localStorage.removeItem(k); } catch {}
+// Les clés « du jour » (paires coupées, saisie, appuis de la montre notés et annulés) : celles des jours passés partent.
+const PAR_JOUR = ["carnet:ss-off:", "carnet:saisie:", "carnet:montre-notes:", "carnet:montre-annules:"];
+try { for (const k of Object.keys(localStorage)) if (PAR_JOUR.some((p) => k.startsWith(p) && k !== p + jour)) localStorage.removeItem(k); } catch {}
 const ssActif = (nom) => { const p = partenaireSuperset(nom); return !!p && !ssOff.has(clefSuperset(nom, p)); };
 function couperSuperset(a, b, off) {
   const k = clefSuperset(a, b);
@@ -1963,6 +1965,110 @@ function envoyerPlanPont(force = false) {
 // L'état complet : le plan d'abord (la montre y cale ses étapes), puis le repos.
 function envoyerEtatPont() { envoyerPlanPont(true); envoyerReposPont(true); }
 
+// Les appuis de la montre notés aujourd'hui (id → ts de l'appui, en s) et ceux qu'elle a annulés ([{ id, ts }]).
+const NOTES = `carnet:montre-notes:${jour}`, ANNULES = `carnet:montre-annules:${jour}`;
+const appuiAnnule = (a) => lire(ANNULES, []).some((x) => x.id === a.id && x.ts === a.ts);
+
+// Un geste de la montre (forme : plan v2, « Messages »), appliqué avec les fonctions des boutons du téléphone, à
+// l'heure du geste (ts). "invalide" : illisible (dg n'en sait rien) ; "doublon" : n déjà pris (le pont le rend
+// encore après un rechargement d'avant l'acquittement) ; "ignore" : sans objet (périmé, nom inconnu, ligne déjà
+// faite…) ; "applique". dg est gardé avant d'agir : un geste qui lève ne sera pas rejoué. Pas de toast, sauf
+// pour une annulation.
+function appliquerGeste(brut) {
+  const m = lireGeste(brut);
+  if (!m) return "invalide";
+  if (m.n <= pontDg) return "doublon";
+  pontDg = m.n; ecrire("carnet:montre-dg", pontDg);
+  const connu = (nom) => exosAffiches(seanceDuJour()).includes(nom);   // avant lignesDe, qui créerait sa saisie
+  let fait = false;
+  switch (m.g) {
+    case "appui": {
+      const autres = new Map();
+      if (appliquerAppui(m.a, autres, { duJourSur: true }) !== "noter") break;
+      if (m.a.jour === jour) { sauver(); pontFait = m.a.id; reposDepuisAppli(m.a, { ts: m.ts, effort: true }); }
+      else synchroniser();
+      fait = true; break;
+    }
+    case "annuler":
+      fait = dernierAppui(m.id) && annulerAppui(m.id);
+      if (fait) toast("Montre : série annulée");
+      break;
+    case "plus15": case "moins15": fait = ajusterRepos(m.g === "plus15" ? 15 : -15); break;
+    case "pause": fait = pauseRepos(m.ts); break;
+    case "reprendre": fait = reprendreRepos(m.ts); break;
+    case "passer": fait = minu?.mode === "repos" && passerRepos(); break;
+    case "regler": {
+      if (!connu(m.nom)) break;
+      const { L, W } = lignesDe(m.nom);
+      if (!(m.ech ? W : L).some((x) => x.k === m.k && !x.fait)) break;
+      regler(m.nom, m.k, m.ech, m.champ, m.v);
+      fait = true; break;
+    }
+    case "reserve": fait = noterReserve(m.nom, m.k, m.e); break;
+    case "plus1": fait = uneSerieDePlus(m.nom); break;
+    case "exo": {
+      // Seulement si le carnet propose le même exercice que la montre, et hors enchaînement de superset (pas de
+      // flèches au grand format). Sans effet visible (pendant un repos, l'exercice du repos l'emporte) : ignoré.
+      const avant = exoGrand();
+      if (avant !== m.nom || minu?.mode === "superset") break;
+      const garde = [ouvert, choisie];
+      if (changerExo(m.sens) && exoGrand() !== avant) fait = true;
+      else [ouvert, choisie] = garde;
+      break;
+    }
+  }
+  return fait ? "applique" : "ignore";
+}
+
+// Les messages de la montre gardés par le pont (prendreMessages, sans les retirer), appliqués dans l'ordre puis
+// acquittés jusqu'au dernier seq rendu. Une réception à la fois : un appel pendant une réception la relance une
+// fois à la fin. La lecture du serveur en cours (charger) est attendue au plus 3 s : un appui s'ajoute à la
+// séance accordée au serveur, mais sans réseau la salle n'attend pas. `bonjour` (appli montre ouverte) : l'état
+// complet repart, même inchangé (envoyé appli fermée, il a pu se perdre). Un geste qui lève est écarté (il
+// compte comme pris : rejoué, il lèverait encore et bloquerait la file). dg changé : le repos repart, la montre
+// apprend que son geste est pris, même ignoré. Appelée par l'événement `messages`, au démarrage et au retour à
+// l'écran.
+let reception = null, rerecevoir = false;
+function recevoirPont() {
+  if (!pont) return Promise.resolve();
+  if (reception) { rerecevoir = true; return reception; }
+  return reception = (async () => {
+    try {
+      do {
+        rerecevoir = false;
+        try { await recevoirUneFois(); } catch (e) { console.warn("réception de la montre", e?.message); }
+      } while (rerecevoir);
+    } finally { reception = null; }
+  })();
+}
+async function recevoirUneFois() {
+  let delai;
+  await Promise.race([apresLecture(), new Promise((ok) => { delai = setTimeout(ok, 3000); })]);
+  clearTimeout(delai);
+  let messages;
+  try { messages = (await pont.prendreMessages())?.messages || []; }
+  catch (e) { console.warn("messages de la montre non lus", e?.message); return; }
+  if (!messages.length) return;
+  const dg = pontDg;
+  let agi = false;
+  for (const { message } of messages) {
+    try {
+      if (message?.type === "bonjour") envoyerEtatPont();
+      else if (message?.type === "geste" && appliquerGeste(message) === "applique") agi = true;
+    } catch (e) {
+      agi = true;   // il a pu agir à moitié : on redessine
+      console.warn("geste de la montre écarté", e?.message);
+    }
+  }
+  try {
+    // Le repos avant dessiner : le plan qui part ensuite remet `fait` à null (fait vaut « depuis le dernier plan »).
+    if (pontDg !== dg) envoyerReposPont();
+    if (agi) dessiner();
+  } finally {
+    await pont.acquitter({ jusqua: messages.at(-1).seq }).catch((e) => console.warn("acquittement refusé", e?.message));
+  }
+}
+
 // Publie le plan pour la montre (base : carnet_montre_publier). Seulement s'il a changé depuis la dernière
 // publication réussie (clePlan ignore v), sauf `force` : après charger(), le dernier appareil réveillé fait
 // foi, et le plan part au moins une fois par réveil (`reveil`, compté par charger) ; s'il vient de partir
@@ -2039,10 +2145,12 @@ function integrerAppuis() {
 // serveur a raté et le jour n'est connu ni du téléphone ni du cache `distantes` (en créer une l'écraserait au
 // serveur). Le jour même : la séance en mémoire, déjà accordée au serveur par charger. Un autre jour : la copie
 // du téléphone si elle est à envoyer, sinon la plus récente (maj) du téléphone et du serveur, sinon une neuve.
-function seancePourAppui(j, autres) {
+// duJourSur (appui reçu par le pont) : le jour même, la séance est sûre quand même (seanceDuJour) : le plan que
+// la montre a reçu du pont vient de ce téléphone, il fait foi ; sans réseau à la salle, l'appui est noté.
+function seancePourAppui(j, autres, duJourSur = false) {
   const local = lire(`carnet:seance:${j}`), dist = distantes.find((s) => s.jour === j);
   const connu = luServeur || !!local?.doc || !!dist;
-  if (j === jour) return connu ? seanceDuJour() : null;
+  if (j === jour) return connu || duJourSur ? seanceDuJour() : null;
   if (autres.has(j)) return autres.get(j);
   if (!connu) return null;
   const copie = (x) => JSON.parse(JSON.stringify(x));
@@ -2056,15 +2164,16 @@ function seancePourAppui(j, autres) {
 // Un appui appliqué à la séance de son jour (seancePourAppui) ; rend le verdict de la garde ("noter" s'il a
 // été noté), ou "attente" si cette séance n'est pas sûre (rien n'est fait, ni journalisé : il sera relu). La
 // séance d'un autre jour est gardée dans `autres` le temps de l'intégration et écrite « à envoyer ». Pas de
-// repos pour elle.
-function appliquerAppui(a, autres = new Map()) {
+// repos pour elle. "annule" : l'appui a été annulé par la montre (même id et même ts), il ne revient pas.
+function appliquerAppui(a, autres = new Map(), { duJourSur = false } = {}) {
   const quoi = `${a?.nom}, ${a?.quand}`;
   // Illisible : sans id, nom ou rang ; ou un jour, une charge, des répétitions qui ne se notent pas.
   if (verdictAppui(null, a) === "invalide" || !/^\d{4}-\d{2}-\d{2}$/.test(a.jour) || !Number.isFinite(a.c) || !Number.isFinite(a.r)) {
     journaliserMontre("appli montre : appui illisible"); return "invalide";
   }
   const auJour = a.jour === jour, k = `carnet:seance:${a.jour}`;
-  const d = seancePourAppui(a.jour, autres);
+  if (auJour && appuiAnnule(a)) { journaliserMontre(`appli montre : annulé : ${quoi}`); return "annule"; }
+  const d = seancePourAppui(a.jour, autres, duJourSur);
   if (!d) return "attente";
   const v = verdictAppui(d, a);
   if (v === "doublon") journaliserMontre(`appli montre : déjà intégré : ${quoi}`);
@@ -2088,6 +2197,7 @@ function appliquerAppui(a, autres = new Map()) {
     d.type = typeReel(d); d.maj = new Date().toISOString();
     autres.set(a.jour, d); ecrire(k, { doc: d, sale: true });
   }
+  if (auJour && pont) ecrire(NOTES, { ...lire(NOTES, {}), [a.id]: a.ts });   // le ts, pour une annulation
   journaliserMontre(`appli montre : ${quoi} notée`);
   return v;
 }
@@ -2097,10 +2207,13 @@ function appliquerAppui(a, autres = new Map()) {
 // Un minuteur lancé au téléphone après l'appui (debut, ou fin − durée pour un minuteur gardé d'avant) est plus
 // récent : il reste tel quel, avec sa notification. Sans repos en cours, l'exercice ouvert est celui que le
 // grand format proposerait à la fin du repos de l'appui (le partenaire d'un superset, comme le bouton « go »).
-function reposDepuisAppli(a) {
-  if (minu && !minu.appli && (minu.debut ?? minu.fin - minu.duree * 1000) > a.ts * 1000) return;
+// minu.appui : l'id de l'appui, pour qu'annulerAppui arrête ce repos-là. Par le pont : `ts`, l'heure du geste
+// (ms), fait le début et la fin du repos ; `effort` pose la question de la réserve (comme validerSerie).
+function reposDepuisAppli(a, { ts, effort = false } = {}) {
+  const t = ts ?? a.ts * 1000;
+  if (minu && !minu.appli && (minu.debut ?? minu.fin - minu.duree * 1000) > t) return;
   ouvert = a.nom;
-  const fin = finReposAppui(a, Date.now());
+  const fin = ts == null ? finReposAppui(a, Date.now()) : a.repos && ts + a.repos * 1000 > Date.now() ? ts + a.repos * 1000 : null;
   if (!fin) {
     const avant = minu;
     minu = { nom: a.nom, mode: "repos" }; ouvert = exoGrand(); minu = avant;
@@ -2108,7 +2221,12 @@ function reposDepuisAppli(a) {
     return;
   }
   minu = { nom: a.nom, quoi: `Montre · ${a.nom}`, cible: "repos lancé par la montre", duree: a.repos, fin, restant: null,
-           mode: "repos", impose: true, appli: true };
+           mode: "repos", impose: true, appli: true, appui: a.id };
+  if (ts != null) minu.debut = ts;
+  if (effort && !a.ech && a.jour === jour) {
+    const { e, mode, ci } = lignesDe(a.nom), i = e?.series?.findIndex((x) => x.m === a.id) ?? -1;
+    if (mode === "charge" && i >= 0) minu.effort = { nom: a.nom, i, vise: ci?.r ?? schemaDe(a.nom).reps };
+  }
   sonne = false; garder();
 }
 
@@ -2252,31 +2370,49 @@ function noterReserve(nom, i, e) {
   if (minu) garder();
   return true;
 }
-// Un appui de l'appli montre annulé : la série (ou l'échauffement) qu'il a notée (marque m === id) est retirée
-// de la séance du jour, les réglages des lignes suivantes décalés comme retirerSerie, l'exercice resté vide
-// retiré, et le repos lancé par cet appui arrêté.
-function annulerAppui(id) {
-  const s = seanceDuJour();
-  for (const e of s.exos) {
+// La ligne (série ou échauffement) de la séance du jour notée par l'appui id (marque m === id), ou null.
+function ligneDAppui(id) {
+  for (const e of seanceDuJour().exos) {
     const ech = !e.series?.some((x) => x.m === id), l = ech ? e.ech : e.series, i = l?.findIndex((x) => x.m === id) ?? -1;
-    if (i < 0) continue;
-    l.splice(i, 1);
-    let effort = false;
-    if (ech) { lignesDe(e.nom).st.echEdits = {}; if (!e.ech.length) delete e.ech; }   // comme le × d'un échauffement
-    else {
-      decaler(e.nom, i, -1);
-      // La réserve demandée suit sa série ; si c'est celle-ci, la question tombe.
-      const ef = minu?.effort;
-      if (ef?.nom === e.nom && ef.i >= i) { effort = true; if (ef.i === i) delete minu.effort; else ef.i--; }
-    }
-    if (!e.series.length && !e.ech?.length && !e.note && !e.hp) s.exos = s.exos.filter((z) => z !== e);
-    choisie = null;
-    if (minu?.appui === id) arreterRepos(); else if (effort) garder();
-    sauver();
-    journaliserMontre(`appli montre : ${e.nom} annulée`);
-    return true;
+    if (i >= 0) return { e, ech, l, i };
   }
-  return false;
+  return null;
+}
+// L'appui id est le dernier noté de son exercice : aucune ligne marquée après lui (après un échauffement, aucune
+// série marquée). Une série notée ensuite au téléphone ne compte pas. La montre n'annule que son dernier geste ;
+// un appui plus ancien décalerait les rangs (et les id) de ceux qui l'ont suivi.
+function dernierAppui(id) {
+  const x = ligneDAppui(id);
+  return !!x && !(x.ech ? [...x.l.slice(x.i + 1), ...(x.e.series || [])] : x.l.slice(x.i + 1)).some((y) => y.m);
+}
+// Un appui de l'appli montre annulé : la série (ou l'échauffement) qu'il a notée est retirée de la séance du
+// jour, les réglages des lignes suivantes décalés comme retirerSerie, l'exercice resté vide retiré, et le repos
+// lancé par cet appui arrêté. L'appui annulé (id et ts) est gardé pour la journée : rendu plus tard par la base,
+// il n'est pas noté ; la série refaite (même id, autre ts) l'est. Puis l'état complet repart à la montre (plan
+// forcé), `fait` remis à null avant tout envoi s'il visait cet appui. Le geste « annuler » de la montre n'y
+// arrive que pour le dernier appui noté de l'exercice (dernierAppui).
+function annulerAppui(id) {
+  const x = ligneDAppui(id);
+  if (!x) return false;
+  const s = seanceDuJour(), { e, ech, l, i } = x;
+  if (pontFait === id) pontFait = null;
+  if (pont) ecrire(ANNULES, [...lire(ANNULES, []), { id, ts: lire(NOTES, {})[id] ?? null }]);
+  l.splice(i, 1);
+  let effort = false;
+  if (ech) { lignesDe(e.nom).st.echEdits = {}; if (!e.ech.length) delete e.ech; }   // comme le × d'un échauffement
+  else {
+    decaler(e.nom, i, -1);
+    // La réserve demandée suit sa série ; si c'est celle-ci, la question tombe.
+    const ef = minu?.effort;
+    if (ef?.nom === e.nom && ef.i >= i) { effort = true; if (ef.i === i) delete minu.effort; else ef.i--; }
+  }
+  if (!e.series.length && !e.ech?.length && !e.note && !e.hp) s.exos = s.exos.filter((z) => z !== e);
+  choisie = null;
+  if (minu?.appui === id) arreterRepos(); else if (effort) garder();
+  sauver();
+  journaliserMontre(`appli montre : ${e.nom} annulée`);
+  envoyerEtatPont();
+  return true;
 }
 
 function clicMinuteur(ev) {
@@ -2631,7 +2767,10 @@ majMini();
 // ───────────────────────────────────────── démarrage
 
 window.addEventListener("online", synchroniser);
-document.addEventListener("visibilitychange", () => { if (!document.hidden) { charger(); relireMontre(); if (minu) { garder(); ecranAllume(); } } });
+// Au retour à l'écran, dans l'APK : les gestes faits page cachée d'abord (repos calé sur leur ts), puis l'état
+// complet (les appels au pont restaient en attente page cachée).
+document.addEventListener("visibilitychange", () => { if (!document.hidden) { charger(); relireMontre(); if (minu) { garder(); ecranAllume(); }
+  if (pont) recevoirPont().then(envoyerEtatPont); } });
 if (minu) garder();
 if ("serviceWorker" in navigator) {
   navigator.serviceWorker.register("sw.js");
@@ -2645,10 +2784,11 @@ if ("serviceWorker" in navigator) {
 // Carnet fermé quand on a touché « Série faite » sur la montre : le service worker l'a rouvert avec la série.
 { const m = location.hash.match(/^#montre=(.+)$/);
   if (m) { history.replaceState(null, "", location.pathname); try { depuisMontre(JSON.parse(decodeURIComponent(m[1]))); } catch {} } }
-// Pont de l'APK (avec ou sans clé) : l'écouteur d'abord, puis etat() (« Contrat commun » du pont : un changement
-// de présence arrivé entre les deux ne se perd pas). etat() peut prendre ~8 s : rien ne l'attend, et la présence
-// apprise entre-temps par l'événement, plus récente, l'emporte sur la sienne.
+// Pont de l'APK (avec ou sans clé) : les écouteurs d'abord, puis etat() et la première réception (« Contrat
+// commun » du pont : un message ou un changement de présence arrivé entre les deux ne se perd pas). etat() peut
+// prendre ~8 s : rien ne l'attend, et la présence apprise entre-temps par l'événement, plus récente, l'emporte.
 if (pont) {
+  pont.addListener("messages", () => recevoirPont());
   pont.addListener("connexion", ({ presente }) => { pontPresente = !!presente; if (pontPresente) envoyerEtatPont(); });
   pont.etat().then((x) => {
     if (pontPresente !== undefined) return;
@@ -2660,3 +2800,4 @@ if (pont) {
 caches?.keys?.().then((ks) => { const v = ks.find((k) => k.startsWith("fittracking-")); if (v) $("#version").textContent = `FitTracking ${v.slice(12)}`; }).catch(() => {});
 dessiner();
 if (cle) charger();
+recevoirPont();   // après charger : la réception attend sa lecture du serveur
