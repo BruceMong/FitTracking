@@ -54,6 +54,7 @@ export function messagePlan(plan, exos, { v, dg }) {
   for (const et of plan.etapes) {
     if (!rang.has(et.nom)) {
       const ex = exos[et.nom];
+      if (!ex) throw new Error(`messagePlan : l'exercice « ${et.nom} » manque à exos`);
       rang.set(et.nom, x.length);
       x.push([et.nom, ex.n, et.pas ?? 0, ex.ss ? 1 : 0, MODES[ex.mode] ?? 0]);
     }

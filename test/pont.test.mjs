@@ -66,3 +66,39 @@ test("messagePlan : 30 étapes réalistes en moins de 1 Ko", () => {
   assert.equal(m.x.length, 9);
   assert.ok(new TextEncoder().encode(JSON.stringify(m)).length < 1024);
 });
+
+test("lireGeste : regler accepte les deux champs c et r", () => {
+  for (const champ of ["c", "r"])
+    assert.equal(lireGeste(g("regler", { nom: DC, k: 0, ech: true, champ, v: 8 })).champ, champ);
+});
+test("lireGeste : chaque champ invalide rend null", () => {
+  const regler = { nom: DC, k: 0, ech: false, champ: "c", v: 1 };
+  const mauvais = [
+    g("regler", { ...regler, ech: "oui" }), g("regler", { ...regler, ech: 0 }),
+    g("regler", { ...regler, k: -1 }), g("regler", { ...regler, k: 1.5 }),
+    g("regler", { ...regler, v: NaN }), g("regler", { ...regler, v: "45" }),
+    g("regler", { ...regler, nom: undefined }), g("plus1", { nom: "" }),
+    g("annuler", {}), g("annuler", { id: 3 }),
+    g("appui", { a: "x" }), g("appui", { a: [] }), g("appui", { a: null }),
+    g("reserve", { nom: DC, k: 0, e: -1 }), g("reserve", { nom: DC, k: 0, e: 1.5 }),
+    g("plus15", { ts: NaN }), g("plus15", { ts: Infinity }),
+  ];
+  mauvais.forEach((m, i) => assert.equal(lireGeste(m), null, `cas ${i}`));
+});
+test("messageRepos : id = debut quand il diffère de fin - duree * 1000", () => {
+  const minu = { nom: DC, mode: "repos", duree: 150, fin: TS + 150000, restant: null, debut: TS + 5 };
+  assert.equal(messageRepos(minu, { v: 1, dg: 0, fait: null }).r.id, TS + 5);
+});
+test("messagePlan : le bit superset de x vaut 1 pour un exercice en superset", () => {
+  const J = "2026-11-09", EL = "Élévations latérales";
+  const plan = { jour: J, v: null, etapes: [
+    { id: `${J}|${DC}|0`, nom: DC, quoi: "série 1/1", txt: "40 kg × 6", repos: 90, ech: false, k: 0, c: 40, r: 6, u: null, pas: 2.5 },
+    { id: `${J}|${EL}|0`, nom: EL, quoi: "série 1/1 · superset", txt: "8 kg × 12", repos: 90, ech: false, k: 0, c: 8, r: 12, u: null, pas: 1 }] };
+  const m = messagePlan(plan, { [DC]: { n: 1, ss: false, mode: "charge" }, [EL]: { n: 1, ss: true, mode: "charge" } }, { v: 1, dg: 0 });
+  assert.deepEqual(m.x, [[DC, 1, 2.5, 0, 0], [EL, 1, 1, 1, 0]]);
+});
+test("messagePlan : exercice absent de exos, erreur claire", () => {
+  const J = "2026-11-09";
+  const plan = { jour: J, v: null, etapes: [{ id: "i", nom: DC, quoi: "q", txt: "t", repos: 60, ech: false, k: 0, c: 1, r: 1, u: null, pas: 0 }] };
+  assert.throws(() => messagePlan(plan, {}, { v: 1, dg: 0 }), (e) => e instanceof Error && !(e instanceof TypeError) && e.message.includes(DC) && /manque/.test(e.message));
+});
