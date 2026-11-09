@@ -168,3 +168,12 @@ reset role;
 do $$ begin
   assert (select count(*) from public.montre_appuis where serie = 'anon|appel') = 1, 'appui sous anon non inséré';
 end $$;
+
+-- droits_alignes_sur_le_carnet : anon exécute les fonctions de la montre, authenticated non (comme carnet_lire)
+do $$ begin
+  assert has_function_privilege('anon', 'public.carnet_montre_plan(text)', 'execute'), 'anon doit exécuter carnet_montre_plan';
+  assert not has_function_privilege('authenticated', 'public.carnet_montre_plan(text)', 'execute'), 'authenticated ne doit pas exécuter carnet_montre_plan';
+  assert not has_function_privilege('authenticated', 'public.carnet_montre_publier(text, jsonb)', 'execute'), 'authenticated ne doit pas exécuter carnet_montre_publier';
+  assert not has_function_privilege('authenticated', 'public.carnet_montre_appui(text, jsonb)', 'execute'), 'authenticated ne doit pas exécuter carnet_montre_appui';
+  assert not has_function_privilege('authenticated', 'public.carnet_montre_appuis(text, bigint)', 'execute'), 'authenticated ne doit pas exécuter carnet_montre_appuis';
+end $$;

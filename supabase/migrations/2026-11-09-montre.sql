@@ -109,3 +109,8 @@ begin
                    from public.montre_appuis a
                    where a.id > coalesce(p_depuis, 0) and a.recu > now() - interval '7 days'), '[]'::jsonb);
 end $function$;
+
+-- Mêmes droits que les autres fonctions carnet_* : anon (clé publiable) et service_role, pas authenticated ni public.
+-- (appliqué en production le 2026-11-09, migration montre_revoke_authenticated)
+revoke execute on function public.carnet_montre_publier(text, jsonb), public.carnet_montre_plan(text),
+  public.carnet_montre_appui(text, jsonb), public.carnet_montre_appuis(text, bigint) from authenticated, public;
