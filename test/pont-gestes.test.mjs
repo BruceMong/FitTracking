@@ -459,6 +459,8 @@ test("appui + 4 × +15 reçus à TS + 160 s : pas de sonnerie à la réception, 
     ...[1, 2, 3, 4].map((i) => ({ ...geste(N + i, "plus15"), ts: TS + 60000 })));
   b.evaluer("majRepos()");
   assert.deepEqual(b.json("sonneries"), []);
+  // Tâche 6 : montre présente, c'est elle qui vibre à la fin ; le téléphone sonne quand elle est partie.
+  b.pont.connexion(false);
   b.evaluer(`Date.now = () => ${TS + 211000}; majRepos(); majRepos()`);   // la fin réelle passe : une sonnerie
   assert.deepEqual(b.json("sonneries.map((x) => x[0])"), ["vibre", "bip"]);
 });

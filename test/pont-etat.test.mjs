@@ -175,3 +175,106 @@ test("plan compact rebâti à l'identique : « + une série », et superset aux 
   assert.deepEqual(m2.x.map((x) => x.slice(0, 2)), [[DC, 4], [TRI, 3], [ELE, 4]]);
   assert.deepEqual(deplier(m2), b2.json("planMontre().etapes"));
 });
+
+// ── Fin de repos dans l'APK (tâche 6) : le carnet programme la notification native de fin (programmerFin), et
+// ne sonne pas une seconde fois ce que le natif (notification du pont, ou vibration de la montre) a déjà sonné.
+const TITRE = "Repos terminé", TEXTE_DC = `${DC} · série 2/4 ensuite · 42,5 kg × 6`;
+// Sonneries de fin espionnées : la vibration de fin (le motif, pas les petites vibrations des boutons), le bip et
+// le flash de l'écran.
+const espionFin = (b) => b.evaluer(`globalThis.sonneries = [];
+  navigator.vibrate = (x) => { if (Array.isArray(x)) sonneries.push("vibre"); }; bip = () => sonneries.push("bip");
+  $("#flash").classList.add = () => sonneries.push("flash");`);
+const finDuRepos = (b) => b.evaluer(`minu.fin = ${T0 - 1}; majRepos()`);
+
+test("programmerFin suit le repos : lancé, en pause, repris, ±15 s, arrêté ; repos de la montre compris", async () => {
+  const b = await chargerCarnet({ stockage: avecCtx(), pont: {} });
+  b.evaluer(`validerSerie(${q(DC)})`);
+  assert.deepEqual(b.pont.fins.at(-1), { fin: T0 + 150000, titre: TITRE, texte: TEXTE_DC });
+  b.evaluer("pauseRepos()");
+  assert.equal(b.pont.fins.at(-1).fin, null);
+  b.evaluer("reprendreRepos()");
+  assert.equal(b.pont.fins.at(-1).fin, T0 + 150000);
+  b.evaluer("ajusterRepos(15)");
+  assert.equal(b.pont.fins.at(-1).fin, T0 + 165000);
+  b.evaluer("arreterRepos()");
+  assert.equal(b.pont.fins.at(-1).fin, null);
+  // un repos lancé par la montre aussi : le pont décide à l'échéance si la montre est là
+  b.evaluer(`reposDepuisAppli({ id: ${q(ID0)}, nom: ${q(DC)}, jour: "2026-11-09", ech: false, repos: 150, ts: ${T0 / 1000} },
+    { ts: ${T0 - 10000} })`);
+  assert.deepEqual(b.pont.fins.at(-1), { fin: T0 + 140000, titre: TITRE, texte: `Montre · ${DC} · repos lancé par la montre` });
+});
+
+test("fin du repos, montre présente : ni vibration ni bip (le flash reste) ; absente : comme en v1", async () => {
+  for (const [presente, attendu] of [[true, ["flash"]], [false, ["vibre", "bip", "flash"]]]) {
+    const b = await chargerCarnet({ stockage: avecCtx(), pont: { presente } });
+    b.evaluer(`validerSerie(${q(DC)})`); espionFin(b);
+    finDuRepos(b); b.evaluer("majRepos()");
+    assert.deepEqual(b.json("sonneries"), attendu, `présente : ${presente}`);
+    assert.equal(b.json("sonne"), true);
+  }
+});
+
+test("fin passée page cachée (APK) : sonne sans sonner, même montre absente ; pas de seconde alerte au retour", async () => {
+  const b = await chargerCarnet({ stockage: avecCtx(), pont: { presente: false } });
+  b.evaluer(`validerSerie(${q(DC)})`); espionFin(b);
+  b.visibilite(false);
+  finDuRepos(b);   // un tic qui tourne encore page cachée
+  assert.equal(b.json("sonne"), true);
+  assert.deepEqual(b.json("sonneries"), ["flash"]);
+  b.visibilite(true); await b.attendre(); b.evaluer("majRepos()");
+  assert.deepEqual(b.json("sonneries"), ["flash"]);
+  // un nouveau repos, fini page visible : il sonne (sonne remis à false par le repos)
+  b.evaluer(`validerSerie(${q(DC)}); Date.now = () => ${T0 + 151000}; majRepos()`);
+  assert.deepEqual(b.json("sonneries"), ["flash", "vibre", "bip", "flash"]);
+});
+
+test("fin passée page cachée sans aucun tic : constatée au retour à l'écran, elle ne sonne pas", async () => {
+  const b = await chargerCarnet({ stockage: avecCtx(), pont: { presente: false } });
+  b.evaluer(`validerSerie(${q(DC)})`); espionFin(b);
+  b.visibilite(false);
+  b.evaluer(`minu.fin = ${T0 - 1}`);   // page endormie : aucun majRepos avant le retour
+  b.visibilite(true); await b.attendre();
+  assert.equal(b.json("sonne"), true);
+  assert.deepEqual(b.json("sonneries"), ["flash"]);
+});
+
+test("en pause, la fin figée ne compte pas : un −15 s qui épuise le restant après un retour à l'écran sonne", async () => {
+  const b = await chargerCarnet({ stockage: avecCtx(), pont: { presente: false } });
+  b.evaluer(`validerSerie(${q(DC)}); minu.restant = 10; minu.fin = ${T0 - 60000}; garder()`); espionFin(b);
+  b.visibilite(false); b.visibilite(true); await b.attendre();
+  assert.deepEqual(b.json("sonneries"), []);
+  b.evaluer("ajusterRepos(-15)");
+  assert.deepEqual(b.json("sonneries"), ["vibre", "bip", "flash"]);
+});
+
+test("programmerFin redonné au démarrage et au retour à l'écran (la fin meurt avec le service)", async () => {
+  const stocke = (fin) => avecCtx({ "carnet:minuteur": { nom: DC, quoi: `${DC} · série 2/4 ensuite`, cible: "42,5 kg × 6",
+    duree: 150, fin, restant: null, mode: "repos", impose: false, debut: fin - 150000 } });
+  const b = await chargerCarnet({ stockage: stocke(T0 + 60000), pont: {} });
+  assert.deepEqual(b.pont.fins, [{ fin: T0 + 60000, titre: TITRE, texte: TEXTE_DC }]);
+  b.pont.vider();
+  b.visibilite(false);
+  assert.equal(b.pont.fins.length, 0);
+  b.visibilite(true); await b.attendre();
+  assert.deepEqual(b.pont.fins, [{ fin: T0 + 60000, titre: TITRE, texte: TEXTE_DC }]);
+  // repos fini : rien à programmer, l'ancienne fin annulée
+  const b2 = await chargerCarnet({ stockage: stocke(T0 - 1000), pont: {} });
+  assert.deepEqual(b2.pont.fins.map((x) => x.fin), [null]);
+  // sans repos : null au démarrage et au retour
+  const b3 = await chargerCarnet({ stockage: avecCtx(), pont: {} });
+  b3.visibilite(false); b3.visibilite(true); await b3.attendre();
+  assert.deepEqual(b3.pont.fins.map((x) => x.fin), [null, null]);
+});
+
+test("Chrome : programmerFin jamais appelé, vibration et bip comme en v1, fin passée page cachée comprise", async () => {
+  const b = await chargerCarnet({ stockage: avecCtx() });
+  b.evaluer(`validerSerie(${q(DC)}); programmerFinPont()`); espionFin(b);
+  finDuRepos(b);
+  assert.deepEqual(b.json("sonneries"), ["vibre", "bip", "flash"]);
+  // pas de notification native : la fin passée page cachée sonne au retour, comme en v1
+  b.evaluer(`arreterRepos(); validerSerie(${q(DC)}); sonneries.length = 0`);
+  b.visibilite(false); b.evaluer(`minu.fin = ${T0 - 1}`);
+  b.visibilite(true); await b.attendre(); b.evaluer("majRepos()");
+  assert.deepEqual(b.json("sonneries"), ["vibre", "bip", "flash"]);
+  assert.equal(b.messagesSW.at(-1).repos, null);   // le service worker suit comme avant (repos fini : rien)
+});

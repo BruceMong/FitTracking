@@ -63,6 +63,7 @@ let montre = lire("carnet:montre", false);
 const pont = window.Capacitor?.Plugins?.Montre || null;
 let pontPresente, pontDg = lire("carnet:montre-dg", 0), pontV = lire("carnet:montre-v", 0), pontFait = null;
 let pontReposVu = null, pontPlanVu = null;   // derniers repos (hors v) et plan (clePlan) envoyés
+let pontVisibleA = 0;                         // heure du dernier retour de la page à l'écran (visibilitychange)
 let distantes = lire("carnet:seances", []);    // séances des 90 derniers jours, vues du serveur
 const jour = aujourdhui();
 let doc = lire(`carnet:seance:${jour}`)?.doc || null;
@@ -1844,7 +1845,17 @@ function prevenirSW() {
   const serie = nom ? { nom, jour, id: idSerie(nom), ech: aFaire(nom).ech, txt: cibleTxt(nom), quand: quandSerie(nom) } : null;
   navigator.serviceWorker?.controller?.postMessage({ repos: repos ? minu.fin : ss && serie ? Date.now() : null,
     quoi: [minu?.quoi, minu?.cible].filter(Boolean).join(" · "), serie, toujours: montre });
-  envoyerReposPont();
+  envoyerReposPont(); programmerFinPont();
+}
+// Dans l'APK, la fin du repos est une notification native du pont (programmerFin, « Contrat commun ») : à
+// l'échéance, le pont la montre si l'appli montre est absente et la page cachée. Repos de la montre compris (le
+// pont juge sa présence à l'échéance). En pause, fini ou sans repos : null, l'ancienne fin est annulée. La fin
+// programmée meurt avec le service : redonnée au démarrage et à chaque retour à l'écran.
+function programmerFinPont() {
+  if (!pont) return;
+  const fin = minu?.mode === "repos" && minu.restant == null && minu.fin > Date.now() ? minu.fin : null;
+  pont.programmerFin({ fin, titre: "Repos terminé", texte: [minu?.quoi, minu?.cible].filter(Boolean).join(" · ") })
+    .catch(() => {});
 }
 // Ce qui identifie la prochaine série d'un exercice : si elle a déjà été notée au téléphone, le bouton
 // de la montre, venu trop tard, ne la note pas une seconde fois.
@@ -2294,10 +2305,17 @@ function majRepos() {
     + `<button data-min="stop" class="${reste <= 0 ? "fort" : ""}">${reste <= 0 ? "Go" : "Passer"}</button>`);
   // Pendant un lot de gestes de la montre (enLot), la sonnerie attend la fin du lot : une fin passée y est déjà
   // vibrée par la montre, et le repos du lot fini est retiré après (recevoirUneFois).
+  // Dans l'APK, une fin tombée page cachée (constatée page cachée, ou avant le dernier retour à l'écran) appartient
+  // au natif : la notification du pont, ou la vibration de la montre. Elle compte comme sonnée, sans sonner : le
+  // téléphone ne sonne pas une seconde fois au déverrouillage. Page à l'écran, montre présente : la montre vibre,
+  // le téléphone ne fait que le flash. En pause, la fin est figée (restant) : rien n'a été programmé, comme en v1.
   if (reste <= 0 && !sonne && !enLot) {
     sonne = true;
-    navigator.vibrate?.([300, 150, 300, 150, 300]);
-    bip();
+    const auNatif = pont && minu.restant == null && (document.hidden || minu.fin < pontVisibleA);
+    if (!auNatif && !(pont && pontPresente)) {
+      navigator.vibrate?.([300, 150, 300, 150, 300]);
+      bip();
+    }
     // L'écran clignote aussi : en salle, le bip se perd dans la musique.
     const f = $("#flash"); f.classList.remove("on"); void f.offsetWidth; f.classList.add("on");
   }
@@ -2789,11 +2807,13 @@ majMini();
 // ───────────────────────────────────────── démarrage
 
 window.addEventListener("online", synchroniser);
-// Au retour à l'écran, dans l'APK : les gestes faits page cachée d'abord (repos calé sur leur ts), puis l'état
-// complet (les appels au pont restaient en attente page cachée).
-document.addEventListener("visibilitychange", () => { if (!document.hidden) { charger(); relireMontre(); if (minu) { garder(); ecranAllume(); }
+// Au retour à l'écran, dans l'APK : l'heure du retour d'abord (une fin passée avant appartient au natif, majRepos),
+// la fin du repos redonnée au pont (garder, sinon programmerFinPont : elle meurt avec le service), puis les gestes
+// faits page cachée (repos calé sur leur ts), puis l'état complet (les appels au pont restaient en attente).
+document.addEventListener("visibilitychange", () => { if (!document.hidden) { pontVisibleA = Date.now();
+  charger(); relireMontre(); if (minu) { garder(); ecranAllume(); } else programmerFinPont();
   if (pont) recevoirPont().then(envoyerEtatPont); } });
-if (minu) garder();
+if (minu) garder(); else programmerFinPont();
 if ("serviceWorker" in navigator) {
   navigator.serviceWorker.register("sw.js");
   navigator.serviceWorker.addEventListener("message", (e) => { if (e.data?.montre) depuisMontre(e.data.montre); if (e.data?.montre || e.data?.journal) relireMontre(); });

@@ -182,12 +182,14 @@ export async function chargerCarnet({ maintenant = "2026-11-09T17:00:00+01:00", 
 
   const elements = new Map();
   const parSelecteur = (s) => { if (!elements.has(s)) elements.set(s, elementFactice()); return elements.get(s); };
+  // Les écouteurs du document sont gardés : visibilite() déclenche ceux de visibilitychange.
+  const ecouteursDoc = {};
   const surDocument = {
     querySelector: parSelecteur,
     getElementById: (id) => parSelecteur(`#${id}`),
     querySelectorAll: () => [],
-    addEventListener() {},
-    removeEventListener() {},
+    addEventListener(nom, fn) { (ecouteursDoc[nom] ||= []).push(fn); },
+    removeEventListener(nom, fn) { ecouteursDoc[nom] = (ecouteursDoc[nom] || []).filter((x) => x !== fn); },
     hidden: false,
   };
   const reste = elementFactice();
@@ -296,6 +298,11 @@ export async function chargerCarnet({ maintenant = "2026-11-09T17:00:00+01:00", 
       return c?.entrees.has("journal") ? JSON.parse(c.entrees.get("journal")) : null;
     },
     attendre,
+    // La page passe à l'écran (true) ou cachée (false) : document.hidden, puis les écouteurs visibilitychange.
+    visibilite(visible) {
+      surDocument.hidden = !visible;
+      for (const fn of ecouteursDoc.visibilitychange || []) fn({ type: "visibilitychange" });
+    },
     lancerMinuteurs() {
       const enAttente = [...minuteurs.entries()];
       for (const [id] of enAttente) minuteurs.delete(id);
