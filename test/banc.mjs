@@ -98,11 +98,16 @@ const copier = (x) => (x === undefined ? undefined : JSON.parse(JSON.stringify(x
 // `recevoir(message)` met un message de la montre en file (seq à partir de 1) et prévient les écouteurs
 // `messages` ; `connexion(presente)` change la présence et prévient les écouteurs `connexion`.
 // `etatDiffere` : etat() (lent dans l'APK, ~8 s) ne répond qu'à `rendreEtat()`, avec la présence de l'appel.
-function fauxPont({ presente = true, messages = [], etatDiffere = false } = {}) {
+// Réglables en cours de test, sur `pont` : `finOk` (réponse de programmerFin : false = service arrêté),
+// `notifications` (celle d'etat()), `presenteFin` (celle de presence() ; null : suit `presente`), `presenceRejet`
+// (presence() rejetée), `presenceBloquee` (presence() ne répond qu'à `rendrePresence()`). `presence: false` : pas de presence()
+// (APK d'avant).
+function fauxPont({ presente = true, messages = [], etatDiffere = false, presence = true, notifications = true } = {}) {
   const ecouteurs = { messages: [], connexion: [] };
-  let seq = 0, file = [], rendre = null;
+  let seq = 0, file = [], rendre = null, rendreP = null;
   const pont = {
     envoyes: [], fins: [], acquis: [], appels: [],
+    finOk: true, notifications, presenteFin: null, presenceRejet: false, presenceBloquee: false,
     recevoir(message) {
       file.push({ seq: ++seq, message: copier(message) });
       for (const fn of ecouteurs.messages) fn({ dernier: seq });
@@ -114,12 +119,13 @@ function fauxPont({ presente = true, messages = [], etatDiffere = false } = {}) 
     },
     vider() { pont.envoyes.length = 0; pont.fins.length = 0; },
     rendreEtat() { rendre?.(); rendre = null; },
+    rendrePresence() { rendreP?.(); rendreP = null; },
   };
   for (const m of messages) file.push({ seq: ++seq, message: copier(m) });
   const plugin = {
     etat() {
       pont.appels.push("etat");
-      const x = { kit: "pret", montre: "connectee", appli: "installee", detail: "", presente, notifications: true };
+      const x = { kit: "pret", montre: "connectee", appli: "installee", detail: "", presente, notifications: pont.notifications };
       return etatDiffere ? new Promise((ok) => { rendre = () => ok(x); }) : Promise.resolve(x);
     },
     envoyer(o) {   // gardé tout de suite (un test lit envoyes sans attendre), réponse en promesse
@@ -143,13 +149,20 @@ function fauxPont({ presente = true, messages = [], etatDiffere = false } = {}) 
     programmerFin(o) {
       pont.appels.push("programmerFin");
       pont.fins.push(copier(o));
-      return Promise.resolve({ ok: true });
+      return Promise.resolve({ ok: pont.finOk });
     },
     async addListener(nom, fn) {
       pont.appels.push(`addListener:${nom}`);
       (ecouteurs[nom] ||= []).push(fn);
       return { remove: async () => { ecouteurs[nom] = ecouteurs[nom].filter((x) => x !== fn); } };
     },
+  };
+  // presence() : rapide (sans le kit) ; presenteFin = la présence jugée sur 75 s, celle de la fin de repos native.
+  if (presence) plugin.presence = () => {
+    pont.appels.push("presence");
+    if (pont.presenceBloquee) return new Promise((ok) => { rendreP = () => ok({ presente, presenteFin: pont.presenteFin ?? presente }); });
+    if (pont.presenceRejet) return Promise.reject(Object.assign(new Error("presence"), { code: "ERREUR" }));
+    return Promise.resolve({ presente, presenteFin: pont.presenteFin ?? presente });
   };
   return { pont, plugin };
 }
@@ -172,6 +185,7 @@ export function deplier(m) {
 export async function chargerCarnet({ maintenant = "2026-11-09T17:00:00+01:00", stockage = {}, reponses = {}, pont = null } = {}) {
   const appels = [];
   const messagesSW = [];
+  const vibrations = [];   // navigator.vibrate, dès le chargement d'app.js
   const minuteurs = new Map();
   let prochainMinuteur = 1;
 
@@ -220,7 +234,7 @@ export async function chargerCarnet({ maintenant = "2026-11-09T17:00:00+01:00", 
     localStorage,
     navigator: {
       onLine: true,
-      vibrate() {},
+      vibrate: (x) => { vibrations.push(x); return true; },
       serviceWorker: {
         controller: { postMessage: (m) => messagesSW.push(m) },
         register() {},
@@ -291,6 +305,7 @@ export async function chargerCarnet({ maintenant = "2026-11-09T17:00:00+01:00", 
     },
     appels,
     messagesSW,
+    vibrations,
     pont: faux?.pont ?? null,
     // Synchrone : le cache factice garde le texte de chaque entrée (null si le journal n'a jamais été écrit).
     journalMontre() {

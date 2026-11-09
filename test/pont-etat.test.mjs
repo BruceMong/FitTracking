@@ -184,7 +184,8 @@ const TITRE = "Repos terminé", TEXTE_DC = `${DC} · série 2/4 ensuite · 42,5 
 const espionFin = (b) => b.evaluer(`globalThis.sonneries = [];
   navigator.vibrate = (x) => { if (Array.isArray(x)) sonneries.push("vibre"); }; bip = () => sonneries.push("bip");
   $("#flash").classList.add = () => sonneries.push("flash");`);
-const finDuRepos = (b) => b.evaluer(`minu.fin = ${T0 - 1}; majRepos()`);
+// Le temps passe la fin du repos (d'une seconde), puis un tic. Date.now avance : la page a été chargée avant.
+const finDuRepos = (b) => b.evaluer(`{ const t = minu.fin + 1000; Date.now = () => t; } majRepos()`);
 
 test("programmerFin suit le repos : lancé, en pause, repris, ±15 s, arrêté ; repos de la montre compris", async () => {
   const b = await chargerCarnet({ stockage: avecCtx(), pont: {} });
@@ -204,14 +205,42 @@ test("programmerFin suit le repos : lancé, en pause, repris, ±15 s, arrêté ;
   assert.deepEqual(b.pont.fins.at(-1), { fin: T0 + 140000, titre: TITRE, texte: `Montre · ${DC} · repos lancé par la montre` });
 });
 
-test("fin du repos, montre présente : ni vibration ni bip (le flash reste) ; absente : comme en v1", async () => {
+test("fin du repos, montre présente (sur 75 s) : ni vibration ni bip, le flash reste ; absente : comme en v1", async () => {
   for (const [presente, attendu] of [[true, ["flash"]], [false, ["vibre", "bip", "flash"]]]) {
     const b = await chargerCarnet({ stockage: avecCtx(), pont: { presente } });
     b.evaluer(`validerSerie(${q(DC)})`); espionFin(b);
-    finDuRepos(b); b.evaluer("majRepos()");
+    finDuRepos(b); await b.attendre(); b.evaluer("majRepos()"); await b.attendre();
     assert.deepEqual(b.json("sonneries"), attendu, `présente : ${presente}`);
     assert.equal(b.json("sonne"), true);
   }
+});
+
+test("page à l'écran, montre présente sur 150 s mais pas sur 75 s (morte sans aurevoir) : le téléphone sonne", async () => {
+  const b = await chargerCarnet({ stockage: avecCtx(), pont: {} });
+  b.pont.presenteFin = false;
+  b.evaluer(`validerSerie(${q(DC)})`); espionFin(b);
+  finDuRepos(b); await b.attendre();
+  assert.ok(b.pont.appels.includes("presence"));
+  assert.deepEqual(b.json("sonneries"), ["flash", "vibre", "bip"]);
+  b.evaluer("majRepos()"); await b.attendre();
+  assert.deepEqual(b.json("sonneries"), ["flash", "vibre", "bip"]);   // une fois
+});
+
+test("presence() rejetée, absente (APK d'avant) ou sans réponse : le téléphone sonne (mieux deux alertes qu'aucune)", async () => {
+  for (const [nom, regler] of [["rejet", (p) => { p.presenceRejet = true; }], ["bloquée", (p) => { p.presenceBloquee = true; }]]) {
+    const b = await chargerCarnet({ stockage: avecCtx(), pont: {} });
+    regler(b.pont);
+    b.evaluer(`validerSerie(${q(DC)})`); espionFin(b);
+    finDuRepos(b); await b.attendre(); b.lancerMinuteurs(); await b.attendre();
+    assert.deepEqual(b.json("sonneries"), ["flash", "vibre", "bip"], nom);
+    b.pont.presenteFin = false; b.pont.rendrePresence();   // bloquée : la réponse arrive après le délai
+    b.lancerMinuteurs(); await b.attendre();
+    assert.deepEqual(b.json("sonneries"), ["flash", "vibre", "bip"], `${nom} : une fois`);
+  }
+  const b = await chargerCarnet({ stockage: avecCtx(), pont: { presence: false } });
+  b.evaluer(`validerSerie(${q(DC)})`); espionFin(b);
+  finDuRepos(b); await b.attendre();
+  assert.deepEqual(b.json("sonneries"), ["vibre", "bip", "flash"], "sans presence() : tout de suite");
 });
 
 test("fin passée page cachée (APK) : sonne sans sonner, même montre absente ; pas de seconde alerte au retour", async () => {
@@ -224,7 +253,7 @@ test("fin passée page cachée (APK) : sonne sans sonner, même montre absente ;
   b.visibilite(true); await b.attendre(); b.evaluer("majRepos()");
   assert.deepEqual(b.json("sonneries"), ["flash"]);
   // un nouveau repos, fini page visible : il sonne (sonne remis à false par le repos)
-  b.evaluer(`validerSerie(${q(DC)}); Date.now = () => ${T0 + 151000}; majRepos()`);
+  b.evaluer(`validerSerie(${q(DC)})`); finDuRepos(b);
   assert.deepEqual(b.json("sonneries"), ["flash", "vibre", "bip", "flash"]);
 });
 
@@ -232,16 +261,76 @@ test("fin passée page cachée sans aucun tic : constatée au retour à l'écran
   const b = await chargerCarnet({ stockage: avecCtx(), pont: { presente: false } });
   b.evaluer(`validerSerie(${q(DC)})`); espionFin(b);
   b.visibilite(false);
-  b.evaluer(`minu.fin = ${T0 - 1}`);   // page endormie : aucun majRepos avant le retour
+  b.evaluer(`Date.now = () => ${T0 + 151000}`);   // page endormie : aucun majRepos avant le retour
   b.visibilite(true); await b.attendre();
   assert.equal(b.json("sonne"), true);
   assert.deepEqual(b.json("sonneries"), ["flash"]);
 });
 
+test("page rechargée après la fin (notification touchée, activité détruite) : pas de sonnerie ; Chrome : comme en v1", async () => {
+  const stockage = avecCtx({ "carnet:minuteur": { nom: DC, quoi: `${DC} · série 2/4 ensuite`, cible: "42,5 kg × 6",
+    duree: 150, fin: T0 - 1000, restant: null, mode: "repos", impose: false, debut: T0 - 151000 } });
+  const b = await chargerCarnet({ stockage, pont: { presente: false } });
+  assert.equal(b.json("sonne"), true);
+  assert.deepEqual(b.vibrations.filter(Array.isArray), []);
+  const c = await chargerCarnet({ stockage });
+  assert.equal(c.vibrations.filter(Array.isArray).length, 1);
+});
+
+test("service arrêté (programmerFin ok: false) : la fin passée page cachée sonne au retour, comme en v1", async () => {
+  // déjà arrêté quand le repos est lancé
+  const b = await chargerCarnet({ stockage: avecCtx(), pont: { presente: false } });
+  b.pont.finOk = false;
+  b.evaluer(`validerSerie(${q(DC)})`); await b.attendre(); espionFin(b);
+  b.visibilite(false); b.evaluer(`Date.now = () => ${T0 + 151000}`);
+  b.visibilite(true); await b.attendre();
+  assert.deepEqual(b.json("sonneries"), ["vibre", "bip", "flash"]);
+  // arrêté page cachée (« Arrêter » de sa notification) : la réponse du retour à l'écran le dit, la page sonne
+  const c = await chargerCarnet({ stockage: avecCtx(), pont: { presente: false } });
+  c.evaluer(`validerSerie(${q(DC)})`); await c.attendre(); espionFin(c);
+  c.visibilite(false); c.pont.finOk = false; c.evaluer(`Date.now = () => ${T0 + 151000}`);
+  c.visibilite(true); await c.attendre(); c.evaluer("majRepos()"); await c.attendre();
+  assert.deepEqual(c.json("sonneries"), ["flash", "vibre", "bip"]);
+  c.visibilite(false); c.visibilite(true); await c.attendre();   // une autre réponse ok: false : pas deux fois
+  assert.deepEqual(c.json("sonneries"), ["flash", "vibre", "bip"]);
+  // service en marche : rien au retour
+  const d = await chargerCarnet({ stockage: avecCtx(), pont: { presente: false } });
+  d.evaluer(`validerSerie(${q(DC)})`); await d.attendre(); espionFin(d);
+  d.visibilite(false); d.evaluer(`Date.now = () => ${T0 + 151000}`);
+  d.visibilite(true); await d.attendre();
+  assert.deepEqual(d.json("sonneries"), ["flash"]);
+});
+
+test("notifications du Carnet refusées : un toast, une fois ; montre absente, la fin passée page cachée sonne au retour", async () => {
+  const TOAST = "notifications du Carnet refusées : pas d'alerte de fin de repos écran éteint";
+  const b = await chargerCarnet({ stockage: avecCtx(), pont: { presente: false } });
+  b.evaluer("globalThis.toasts = []; toast = (t) => toasts.push(t)");
+  b.pont.notifications = false;
+  b.visibilite(false); b.visibilite(true); await b.attendre();   // relues au retour à l'écran
+  assert.deepEqual(b.json("toasts"), [TOAST]);
+  b.evaluer(`validerSerie(${q(DC)})`); espionFin(b);
+  b.visibilite(false); b.evaluer(`Date.now = () => ${T0 + 151000}`);
+  b.visibilite(true); await b.attendre();
+  assert.deepEqual(b.json("sonneries"), ["vibre", "bip", "flash"]);
+  assert.deepEqual(b.json("toasts"), [TOAST]);   // une fois
+  // lues dès le démarrage ; montre présente, c'est elle qui a vibré : rien au retour
+  const c = await chargerCarnet({ stockage: avecCtx(), pont: { notifications: false } });
+  c.evaluer(`validerSerie(${q(DC)})`); espionFin(c);
+  c.visibilite(false); c.evaluer(`Date.now = () => ${T0 + 151000}`);
+  c.visibilite(true); await c.attendre();
+  assert.deepEqual(c.json("sonneries"), ["flash"]);
+  // démarrage, montre absente : la fin passée page cachée sonne au retour
+  const d = await chargerCarnet({ stockage: avecCtx(), pont: { presente: false, notifications: false } });
+  d.evaluer(`validerSerie(${q(DC)})`); espionFin(d);
+  d.visibilite(false); d.evaluer(`Date.now = () => ${T0 + 151000}`);
+  d.visibilite(true); await d.attendre();
+  assert.deepEqual(d.json("sonneries"), ["vibre", "bip", "flash"]);
+});
+
 test("en pause, la fin figée ne compte pas : un −15 s qui épuise le restant après un retour à l'écran sonne", async () => {
   const b = await chargerCarnet({ stockage: avecCtx(), pont: { presente: false } });
   b.evaluer(`validerSerie(${q(DC)}); minu.restant = 10; minu.fin = ${T0 - 60000}; garder()`); espionFin(b);
-  b.visibilite(false); b.visibilite(true); await b.attendre();
+  b.visibilite(false); b.evaluer(`Date.now = () => ${T0 + 1000}`); b.visibilite(true); await b.attendre();
   assert.deepEqual(b.json("sonneries"), []);
   b.evaluer("ajusterRepos(-15)");
   assert.deepEqual(b.json("sonneries"), ["vibre", "bip", "flash"]);
@@ -277,4 +366,13 @@ test("Chrome : programmerFin jamais appelé, vibration et bip comme en v1, fin p
   b.visibilite(true); await b.attendre(); b.evaluer("majRepos()");
   assert.deepEqual(b.json("sonneries"), ["vibre", "bip", "flash"]);
   assert.equal(b.messagesSW.at(-1).repos, null);   // le service worker suit comme avant (repos fini : rien)
+});
+
+test("programmerFin rejeté : averti (console.warn), rien d'autre", async () => {
+  const b = await chargerCarnet({ stockage: avecCtx(), pont: {} });
+  b.evaluer(`globalThis.avertis = []; globalThis.console = { ...console, warn: (...a) => avertis.push(a.join(" ")) };
+    Capacitor.Plugins.Montre.programmerFin = () => Promise.reject(new Error("MESSAGE_INVALIDE"));
+    validerSerie(${q(DC)})`);
+  await b.attendre();
+  assert.ok(b.json("avertis").includes("fin de repos non programmée MESSAGE_INVALIDE"), b.json("avertis").join(" | "));
 });

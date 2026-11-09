@@ -63,7 +63,12 @@ let montre = lire("carnet:montre", false);
 const pont = window.Capacitor?.Plugins?.Montre || null;
 let pontPresente, pontDg = lire("carnet:montre-dg", 0), pontV = lire("carnet:montre-v", 0), pontFait = null;
 let pontReposVu = null, pontPlanVu = null;   // derniers repos (hors v) et plan (clePlan) envoyés
-let pontVisibleA = 0;                         // heure du dernier retour de la page à l'écran (visibilitychange)
+// Fin de repos native (programmerFin) : pontVisibleA, heure du dernier retour de la page à l'écran, celle du
+// chargement d'abord (page rechargée après la notification touchée : la fin d'avant a déjà été notifiée) ;
+// pontFinOk, la dernière réponse de programmerFin (false : service arrêté, rien ne sera notifié) ; pontNotifs,
+// etat().notifications (false : notifications du Carnet refusées, dit une fois par pontNotifsDit) ; pontTu, le
+// repos dont la fin passée page cachée a été laissée au natif (la page sonne si le service se révèle arrêté).
+let pontVisibleA = pont ? Date.now() : 0, pontFinOk = true, pontNotifs = true, pontNotifsDit = false, pontTu = null;
 let distantes = lire("carnet:seances", []);    // séances des 90 derniers jours, vues du serveur
 const jour = aujourdhui();
 let doc = lire(`carnet:seance:${jour}`)?.doc || null;
@@ -1855,7 +1860,21 @@ function programmerFinPont() {
   if (!pont) return;
   const fin = minu?.mode === "repos" && minu.restant == null && minu.fin > Date.now() ? minu.fin : null;
   pont.programmerFin({ fin, titre: "Repos terminé", texte: [minu?.quoi, minu?.cible].filter(Boolean).join(" · ") })
-    .catch(() => {});
+    .then((x) => {
+      pontFinOk = x?.ok !== false;
+      // Service arrêté page cachée (« Arrêter » de sa notification) : la réponse du retour à l'écran le dit, après
+      // le majRepos qui avait laissé la fin au natif. Rien n'a été notifié : la page sonne, comme en v1.
+      if (!pontFinOk && pontTu && pontTu === minu && !document.hidden) { pontTu = null; sonnerFin(); }
+    }, (e) => console.warn("fin de repos non programmée", e?.message));
+}
+// etat().notifications, au démarrage et à chaque retour à l'écran.
+function lireNotifsPont(x) {
+  if (typeof x?.notifications !== "boolean") return;
+  pontNotifs = x.notifications;
+  if (!pontNotifs && !pontNotifsDit) {
+    pontNotifsDit = true;
+    toast("notifications du Carnet refusées : pas d'alerte de fin de repos écran éteint");
+  }
 }
 // Ce qui identifie la prochaine série d'un exercice : si elle a déjà été notée au téléphone, le bouton
 // de la montre, venu trop tard, ne la note pas une seconde fois.
@@ -2305,17 +2324,18 @@ function majRepos() {
     + `<button data-min="stop" class="${reste <= 0 ? "fort" : ""}">${reste <= 0 ? "Go" : "Passer"}</button>`);
   // Pendant un lot de gestes de la montre (enLot), la sonnerie attend la fin du lot : une fin passée y est déjà
   // vibrée par la montre, et le repos du lot fini est retiré après (recevoirUneFois).
-  // Dans l'APK, une fin tombée page cachée (constatée page cachée, ou avant le dernier retour à l'écran) appartient
-  // au natif : la notification du pont, ou la vibration de la montre. Elle compte comme sonnée, sans sonner : le
-  // téléphone ne sonne pas une seconde fois au déverrouillage. Page à l'écran, montre présente : la montre vibre,
-  // le téléphone ne fait que le flash. En pause, la fin est figée (restant) : rien n'a été programmé, comme en v1.
+  // Dans l'APK, une fin tombée page cachée (constatée page cachée, ou avant le dernier retour à l'écran ou le
+  // chargement) appartient au natif : la notification du pont, ou la vibration de la montre. Elle compte comme
+  // sonnée, sans sonner : le téléphone ne sonne pas une seconde fois au déverrouillage. Sauf si le natif n'a pas pu
+  // notifier : service arrêté (pontFinOk), ou notifications refusées et montre absente : la page sonne, comme en v1.
+  // Page à l'écran, montre présente : le pont dit si elle l'est pour la fin (sonnerSiMontreAbsente). En pause, la
+  // fin est figée (restant) : rien n'a été programmé, comme en v1.
   if (reste <= 0 && !sonne && !enLot) {
     sonne = true;
-    const auNatif = pont && minu.restant == null && (document.hidden || minu.fin < pontVisibleA);
-    if (!auNatif && !(pont && pontPresente)) {
-      navigator.vibrate?.([300, 150, 300, 150, 300]);
-      bip();
-    }
+    const cachee = pont && minu.restant == null && (document.hidden || minu.fin < pontVisibleA);
+    if (cachee && pontFinOk && (pontNotifs || pontPresente)) pontTu = minu;
+    else if (pont && pontPresente && !cachee) sonnerSiMontreAbsente();
+    else sonnerFin();
     // L'écran clignote aussi : en salle, le bip se perd dans la musique.
     const f = $("#flash"); f.classList.remove("on"); void f.offsetWidth; f.classList.add("on");
   }
@@ -2344,6 +2364,21 @@ function majEffort() {
   if (el.dataset.html !== html) { el.innerHTML = html; el.dataset.html = html; }
 }
 
+function sonnerFin() {
+  navigator.vibrate?.([300, 150, 300, 150, 300]);
+  bip();
+}
+// Page à l'écran, montre présente : elle vibre seule à la fin, et le téléphone se tait, si le pont la juge présente
+// pour la fin (presence().presenteFin : un message de moins de 75 s, comme pour sa notification ; pontPresente
+// tient 150 s). presence() absente (APK d'avant), rejetée ou muette 2 s : le téléphone sonne, mieux deux alertes
+// qu'aucune.
+function sonnerSiMontreAbsente() {
+  let decide = false, t = null;
+  const decider = (sonner) => { if (decide) return; decide = true; clearTimeout(t); if (sonner) sonnerFin(); };
+  if (typeof pont.presence !== "function") return decider(true);
+  t = setTimeout(() => decider(true), 2000);
+  try { pont.presence().then((x) => decider(x?.presenteFin !== true), () => decider(true)); } catch { decider(true); }
+}
 function bip() {
   // Trois bips courts, si le téléphone n'est pas en silencieux (la vibration, elle, passe toujours).
   try {
@@ -2812,7 +2847,7 @@ window.addEventListener("online", synchroniser);
 // faits page cachée (repos calé sur leur ts), puis l'état complet (les appels au pont restaient en attente).
 document.addEventListener("visibilitychange", () => { if (!document.hidden) { pontVisibleA = Date.now();
   charger(); relireMontre(); if (minu) { garder(); ecranAllume(); } else programmerFinPont();
-  if (pont) recevoirPont().then(envoyerEtatPont); } });
+  if (pont) { pont.etat().then(lireNotifsPont).catch(() => {}); recevoirPont().then(envoyerEtatPont); } } });
 if (minu) garder(); else programmerFinPont();
 if ("serviceWorker" in navigator) {
   navigator.serviceWorker.register("sw.js");
@@ -2833,6 +2868,7 @@ if (pont) {
   pont.addListener("messages", () => recevoirPont());
   pont.addListener("connexion", ({ presente }) => { pontPresente = !!presente; if (pontPresente) envoyerEtatPont(); });
   pont.etat().then((x) => {
+    lireNotifsPont(x);
     if (pontPresente !== undefined) return;
     pontPresente = !!x?.presente;
     if (pontPresente) envoyerEtatPont();
