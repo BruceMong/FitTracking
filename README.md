@@ -97,6 +97,19 @@ service worker) pour noter ses séries au téléphone, à la salle, même sans r
   fois), garde de rang (« déjà noté » si la série existe), heure de la série = heure de l'appui. Le repos du téléphone
   s'aligne sur celui de la montre, sans notification de fin. La saisie du jour est gardée par jour (`carnet:saisie:<jour>`),
   pour survivre au rechargement. Le chemin par notification ci-dessus reste valable.
+- **Dans l'APK : la montre en direct** (Chrome inchangé : tout passe par le plugin `Montre`, `pont.js`, refusé hors de
+  l'APK ; sans pont ni montre présente, rien ne part). **Envoyé** par le Bluetooth, un message par clé (le plus récent
+  remplace l'ancien) : le `repos` avec son heure de fin **absolue** (la montre compte seule, rien à renvoyer à chaque
+  seconde) et le `plan` **compact** (≈ 950 o pour 30 étapes contre 6 Ko au format verbeux : le Bluetooth Garmin passe ~450
+  o/s ; la montre rebâtit `id`, `quoi` et le texte), republiés à chaque changement et, forcés, quand la montre dit
+  « bonjour » ou se reconnecte. **Reçu** : les gestes de la montre (appui, annuler, ±15 s, pause, passer, réglage de
+  charge ou de reps, réserve, + une série, changement d'exercice), gardés dans une file que le carnet relit à chaque
+  message et au retour à l'écran, puis acquitte. Garde par numéro de geste (`carnet:montre-dg`) : jamais deux fois ; un
+  geste s'applique **à l'heure du geste** (`ts`), pas à celle de la lecture. **Fin de repos** : le pont programme la
+  notification native (`programmerFin`) seulement si la montre est absente (aucun message depuis 75 s) et la page cachée ;
+  montre présente, c'est elle qui vibre. **Coller la clé** : sans lien `#cle=` à scanner, l'accueil de l'APK a un champ
+  « Clé du carnet » (`collerCle`, 16 caractères au moins, le serveur juge). La route v1 (`carnet_montre_publier` au
+  format verbeux, `carnet_montre_appuis`) reste : c'est elle qui sert hors APK et quand le pont est absent.
 - Tests : `TZ=Europe/Paris node --test test/*.test.mjs`
 - **Série ratée** : sous la cible, la question de la réserve dit « 4 sur 6 » et 0 devient « échec ». Sous la cible, la charge
   reste et la série la plus faible vise +1, quelle que soit la raison ; la réserve dit si c'était l'échec ou un arrêt avant.
