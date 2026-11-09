@@ -3,7 +3,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { chargerCarnet, deplier } from "./banc.mjs";
-import { JOUR, DC, TRI, ELE, avecCtx, appui } from "./fixtures.mjs";
+import { JOUR, DC, TRI, ELE, avecCtx, enCours, appui } from "./fixtures.mjs";
 
 const q = JSON.stringify;
 const ID0 = `${JOUR}|${DC}|0`, ID1 = `${JOUR}|${DC}|1`;
@@ -362,4 +362,74 @@ test("sans pont (Chrome) : ni écouteur, ni réception, rien d'écrit pour la mo
   assert.equal(series(b).length, 1);
   assert.equal(await b.evaluer("recevoirPont()"), undefined);
   assert.deepEqual(Object.keys(b.stockage()).filter((k) => /montre-(dg|notes|annules)/.test(k)), []);
+});
+
+// ── Relecture de la tâche 5, tour 1.
+
+test("gestes en lot au retour à l'écran : le repos fini « à la montre » ne l'est qu'après tout le lot", async () => {
+  // déverrouillé à TS + 160 s : appui (repos 150 s) puis quatre +15 faits pendant le repos, reçus ensemble
+  const b = await carnet({ maintenant: new Date(TS + 160000).toISOString() });
+  await recevoir(b, geste(N, "appui", { a: appui(0) }),
+    ...[1, 2, 3, 4].map((i) => ({ ...geste(N + i, "plus15"), ts: TS + 60000 })));
+  assert.equal(b.json("minu?.fin"), TS + 210000);
+  assert.equal(b.json("minu.appui"), ID0);
+  const r = dernier(b, "repos");
+  assert.deepEqual([r.dg, r.r?.fin], [N + 4, TS + 210000]);
+});
+
+test("gestes en lot : un repos encore fini après le lot est retiré (appui tardif), la suite ouverte", async () => {
+  const b = await carnet({ maintenant: new Date(TS + 200000).toISOString() });
+  await recevoir(b, geste(N, "appui", { a: appui(0) }), { ...geste(N + 1, "plus15"), ts: TS + 60000 });
+  assert.equal(b.json("minu"), null);
+  assert.equal(b.json("ouvert"), DC);
+  assert.deepEqual([dernier(b, "repos").dg, dernier(b, "repos").r], [N + 1, null]);
+  // la dernière série de DC : c'est TRI qui s'ouvre, comme à la fin de ce repos
+  const d = await carnet({ maintenant: new Date(TS + 200000).toISOString(),
+    stockage: avecCtx(enCours([0, 1, 2].map(() => ({ c: 42.5, r: 6, t: "16:50:00" })))) });
+  await recevoir(d, geste(N, "appui", { a: appui(3) }));
+  assert.deepEqual(d.json("[minu, ouvert]"), [null, TRI]);
+  // en pause : gardé (le repos attend la reprise)
+  const p = await carnet({ maintenant: new Date(TS + 200000).toISOString() });
+  await recevoir(p, geste(N, "appui", { a: appui(0) }), { ...geste(N + 1, "pause"), ts: TS + 60000 });
+  assert.equal(p.json("minu.restant"), 90);
+});
+
+test("exo, repos fini au carnet (il attend « Go ») : passer puis changer d'exercice, comme au téléphone", async () => {
+  const b = await carnet();
+  await recevoir(b, geste(N, "appui", { a: appui(0) }));
+  b.evaluer("minu.fin = Date.now() - 1000; garder()");
+  assert.deepEqual(b.json("[etatGrand(), exoGrand()]"), ["fini", DC]);
+  await recevoir(b, geste(N + 1, "exo", { nom: DC, sens: 1 }));
+  assert.equal(b.json("minu"), null);
+  assert.equal(b.json("exoGrand()"), TRI);
+  assert.equal(deplier(dernier(b, "plan"))[0].nom, TRI);
+  assert.deepEqual([dernier(b, "repos").dg, dernier(b, "repos").r], [N + 1, null]);
+});
+
+test("exo pendant un repos qui court : ignoré, l'état complet repart", async () => {
+  const b = await carnet();
+  await recevoir(b, geste(N, "appui", { a: appui(0) }));
+  b.pont.vider();
+  assert.equal(b.json(`appliquerGeste(${q(geste(N + 1, "exo", { nom: DC, sens: 1 }))})`), "ignore");
+  assert.deepEqual(b.pont.envoyes.map((x) => x.cle), ["plan", "repos"]);
+  assert.equal(b.json("minu.fin"), TS + 150000);
+  assert.equal(b.json("exoGrand()"), DC);
+});
+
+test("appui d'un autre jour en attente : averti, acquitté (la base le rattrapera)", async () => {
+  const b = await carnet();
+  b.evaluer(`globalThis.avertis = []; globalThis.console = { ...console, warn: (...a) => avertis.push(a.join(" ")) };`);
+  const hier = appui(0, { id: `2026-11-08|${DC}|0`, jour: "2026-11-08", ts: Date.parse("2026-11-08T18:00:00+01:00") / 1000 });
+  await recevoir(b, geste(N, "appui", { a: hier }));
+  assert.equal(b.stockage()["carnet:seance:2026-11-08"], undefined);
+  assert.deepEqual(b.pont.acquis, [1]);
+  assert.equal(b.json("avertis").length, 1);
+  assert.match(b.json("avertis")[0], /2026-11-08/);
+});
+
+test("un geste qui lève après avoir noté sa série : la série est sauvée quand même", async () => {
+  const b = await carnet();
+  b.evaluer(`globalThis.console = { ...console, warn() {} }; journaliserMontre = () => { throw new Error("panne d'essai"); };`);
+  await recevoir(b, geste(N, "appui", { a: appui(0) }));
+  assert.equal(b.stockage()["carnet:seance:2026-11-09"]?.doc.exos[0].series.length, 1);
 });

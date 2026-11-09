@@ -1984,7 +1984,10 @@ function appliquerGeste(brut) {
   switch (m.g) {
     case "appui": {
       const autres = new Map();
-      if (appliquerAppui(m.a, autres, { duJourSur: true }) !== "noter") break;
+      const v = appliquerAppui(m.a, autres, { duJourSur: true });
+      // Un autre jour pas sûr ici (lecture du serveur ratée) : pris quand même, la route de la base le rattrapera.
+      if (v === "attente") console.warn(`appui de la montre du ${m.a.jour} en attente : la base le rattrapera`);
+      if (v !== "noter") break;
       if (m.a.jour === jour) { sauver(); pontFait = m.a.id; reposDepuisAppli(m.a, { ts: m.ts, effort: true }); }
       else synchroniser();
       fait = true; break;
@@ -2008,9 +2011,15 @@ function appliquerGeste(brut) {
     case "plus1": fait = uneSerieDePlus(m.nom); break;
     case "exo": {
       // Seulement si le carnet propose le même exercice que la montre, et hors enchaînement de superset (pas de
-      // flèches au grand format). Sans effet visible (pendant un repos, l'exercice du repos l'emporte) : ignoré.
+      // flèches au grand format). Un repos qui court encore ici : la montre, qui n'en a plus, est recalée (état
+      // complet). Repos fini qui attend « Go » : « Go » puis la flèche, comme au téléphone. Sans effet visible :
+      // ignoré.
+      if (minu?.mode === "superset") break;
+      const etat = etatGrand();
+      if (etat === "repos") { envoyerEtatPont(); break; }
       const avant = exoGrand();
-      if (avant !== m.nom || minu?.mode === "superset") break;
+      if (avant !== m.nom) break;
+      if (etat === "fini") { passerRepos(); changerExo(m.sens); fait = true; break; }
       const garde = [ouvert, choisie];
       if (changerExo(m.sens) && exoGrand() !== avant) fait = true;
       else [ouvert, choisie] = garde;
@@ -2026,9 +2035,10 @@ function appliquerGeste(brut) {
 // séance accordée au serveur, mais sans réseau la salle n'attend pas. `bonjour` (appli montre ouverte) : l'état
 // complet repart, même inchangé (envoyé appli fermée, il a pu se perdre). Un geste qui lève est écarté (il
 // compte comme pris : rejoué, il lèverait encore et bloquerait la file). dg changé : le repos repart, la montre
-// apprend que son geste est pris, même ignoré. Appelée par l'événement `messages`, au démarrage et au retour à
-// l'écran.
-let reception = null, rerecevoir = false;
+// apprend que son geste est pris, même ignoré. Un repos lancé par un appui du lot est créé même si son heure de
+// fin est passée (les +15 / pause qui le suivent dans le lot le prolongent) : « déjà fini, pas de repos » ne se
+// décide qu'après le lot (reposDuLot). Appelée par l'événement `messages`, au démarrage et au retour à l'écran.
+let reception = null, rerecevoir = false, reposDuLot = null;
 function recevoirPont() {
   if (!pont) return Promise.resolve();
   if (reception) { rerecevoir = true; return reception; }
@@ -2051,15 +2061,21 @@ async function recevoirUneFois() {
   if (!messages.length) return;
   const dg = pontDg;
   let agi = false;
+  reposDuLot = null;
   for (const { message } of messages) {
     try {
       if (message?.type === "bonjour") envoyerEtatPont();
       else if (message?.type === "geste" && appliquerGeste(message) === "applique") agi = true;
     } catch (e) {
-      agi = true;   // il a pu agir à moitié : on redessine
+      agi = true;   // il a pu agir à moitié : on redessine, et une série déjà notée ne reste pas qu'en mémoire
+      if (doc) sauver();
       console.warn("geste de la montre écarté", e?.message);
     }
   }
+  // Le repos d'un appui du lot, fini une fois tout le lot appliqué (et pas en pause) : pas de repos, comme par la
+  // base (appui tardif) ; l'exercice ouvert est celui que proposerait la fin de ce repos.
+  if (reposDuLot && minu === reposDuLot && minu.restant == null && minu.fin <= Date.now()) { ouvert = exoGrand(); arreterRepos(); }
+  reposDuLot = null;
   try {
     // Le repos avant dessiner : le plan qui part ensuite remet `fait` à null (fait vaut « depuis le dernier plan »).
     if (pontDg !== dg) envoyerReposPont();
@@ -2213,7 +2229,8 @@ function reposDepuisAppli(a, { ts, effort = false } = {}) {
   const t = ts ?? a.ts * 1000;
   if (minu && !minu.appli && (minu.debut ?? minu.fin - minu.duree * 1000) > t) return;
   ouvert = a.nom;
-  const fin = ts == null ? finReposAppui(a, Date.now()) : a.repos && ts + a.repos * 1000 > Date.now() ? ts + a.repos * 1000 : null;
+  // Par le pont, la fin déjà passée n'est jugée qu'après le lot de gestes (recevoirUneFois, reposDuLot).
+  const fin = ts == null ? finReposAppui(a, Date.now()) : a.repos ? ts + a.repos * 1000 : null;
   if (!fin) {
     const avant = minu;
     minu = { nom: a.nom, mode: "repos" }; ouvert = exoGrand(); minu = avant;
@@ -2222,7 +2239,7 @@ function reposDepuisAppli(a, { ts, effort = false } = {}) {
   }
   minu = { nom: a.nom, quoi: `Montre · ${a.nom}`, cible: "repos lancé par la montre", duree: a.repos, fin, restant: null,
            mode: "repos", impose: true, appli: true, appui: a.id };
-  if (ts != null) minu.debut = ts;
+  if (ts != null) { minu.debut = ts; reposDuLot = minu; }
   if (effort && !a.ech && a.jour === jour) {
     const { e, mode, ci } = lignesDe(a.nom), i = e?.series?.findIndex((x) => x.m === a.id) ?? -1;
     if (mode === "charge" && i >= 0) minu.effort = { nom: a.nom, i, vise: ci?.r ?? schemaDe(a.nom).reps };
