@@ -1884,11 +1884,12 @@ function planMontre() {
     doc = copie(doc); seanceDuJour(); saisie = copie(saisie) || {}; minu = copie(minu); choisie = null;
     const etapes = [];
     for (let nom = exoGrand(), i = 0; nom && i < 100; nom = exoGrand(), i++) {
-      const { l, ech, mode } = aFaire(nom);
+      const { l, ech, mode, pas } = aFaire(nom);
       const etape = { id: idSerie(nom), nom, quoi: quandSerie(nom) + (!ech && ssActif(nom) ? " · superset" : ""),
                       txt: cibleTxt(nom), repos: 0, ech,
                       k: ech ? (doc.exos.find((x) => x.nom === nom)?.ech?.length || 0) : l.k,
-                      c: mode === "charge" ? l.c : 0, r: l.r, u: mode === "duree" ? "s" : null };
+                      c: mode === "charge" ? l.c : 0, r: l.r, u: mode === "duree" ? "s" : null,
+                      pas: mode === "charge" ? pas : 0 };
       // Après chaque geste, le type que sauver() recalculerait : une séance « autre » devient push dès sa
       // première série d'un exercice push, et exosAffiches (donc la suite) en dépend.
       if (ech) { noterEchauffement(nom); doc.type = typeReel(doc); etape.repos = 60; minu = { nom, mode: "repos" }; }

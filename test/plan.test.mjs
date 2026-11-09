@@ -25,7 +25,7 @@ test("plan d'une séance vierge : ordre, textes, repos", async () => {
   assert.deepEqual(ids(b), [D(0), D(1), D(2), D(3), T(0), E(0), T(1), E(1), T(2), E(2)]);
   assert.deepEqual(p.etapes.map((e) => e.repos), [150, 150, 150, 120, 0, 120, 0, 120, 0, 0]);
   assert.deepEqual(p.etapes[0], { id: "2026-11-09|Développé couché guidé|0", nom: DC, quoi: "série 1/4",
-    txt: "42,5 kg × 6", repos: 150, ech: false, k: 0, c: 42.5, r: 6, u: null });
+    txt: "42,5 kg × 6", repos: 150, ech: false, k: 0, c: 42.5, r: 6, u: null, pas: 2.5 });
   assert.deepEqual(p.etapes[3].quoi, "série 4/4");
   assert.deepEqual([p.etapes[4].quoi, p.etapes[4].txt, p.etapes[5].txt], ["série 1/3 · superset", "20 kg × 12", "8 kg × 9"]);
   assert.equal(p.etapes[9].quoi, "série 3/3 · superset");
@@ -35,7 +35,7 @@ test("plan avec un échauffement ajouté au téléphone", async () => {
   const b = await chargerCarnet({ stockage: avecCtx() });
   b.evaluer(`lignesDe(${q(DC)}).st.ech = 1`);
   assert.deepEqual(etapes(b)[0], { id: "2026-11-09|Développé couché guidé|e0", nom: DC, quoi: "échauffement",
-    txt: "22,5 kg × 10", repos: 60, ech: true, k: 0, c: 22.5, r: 10, u: null });
+    txt: "22,5 kg × 10", repos: 60, ech: true, k: 0, c: 22.5, r: 10, u: null, pas: 2.5 });
   assert.equal(etapes(b)[1].id, "2026-11-09|Développé couché guidé|0");
   assert.equal(etapes(b).length, 11);
 });
@@ -62,8 +62,16 @@ test("plan d'une séance de posture : tenues en secondes", async () => {
     exercices: [{ nom: "Étirement des ischios", seance: "posture", groupe: "mobilité", schema: { series: 2, reps: 30 } }] };
   const b = await chargerCarnet({ stockage: { "carnet:ctx": ctx,
     "carnet:seance:2026-11-09": { doc: { jour: "2026-11-09", type: "posture", exos: [], note: "" }, sale: false } } });
-  assert.deepEqual(etapes(b).map((e) => [e.quoi, e.txt, e.c, e.r, e.u, e.repos]),
-    [["série 1/2", "30 s", 0, 30, "s", 30], ["série 2/2", "30 s", 0, 30, "s", 0]]);
+  assert.deepEqual(etapes(b).map((e) => [e.quoi, e.txt, e.c, e.r, e.u, e.repos, e.pas]),
+    [["série 1/2", "30 s", 0, 30, "s", 30, 0], ["série 2/2", "30 s", 0, 30, "s", 0, 0]]);
+});
+
+test("plan : pas de l'exercice (plus petit écart de charges notées), 0 sans charge", async () => {
+  const ctx = { ...ctxPush, historique: { ...ctxPush.historique, [ELE]: { jour: "2026-11-05", series: [[8, 12], [10, 12], [10, 10]] } } };
+  const b = await chargerCarnet({ stockage: { "carnet:ctx": ctx } });
+  const e = etapes(b);
+  assert.equal(e.find((x) => x.nom === DC).pas, 2.5);
+  assert.equal(e.find((x) => x.nom === ELE).pas, 2);
 });
 
 test("le plan suit le grand format pas à pas", async () => {
