@@ -103,6 +103,13 @@
   dialog input { width: 100%; height: 44px; border-radius: 10px; border: 1px solid var(--ligne);
     background: var(--bg); color: var(--texte); font-size: 16px; padding: 0 10px; }
   .choix { max-height: 50vh; overflow-y: auto; margin-top: 8px; }
+  /* Le dialogue d'ajout : une colonne, intertitres par muscle, défilement interne (la grille .choix plus bas ne le concerne pas). */
+  #ajout { max-height: 85vh; }
+  #choix { display: block; max-height: calc(85vh - 140px); overflow-x: hidden; overflow-y: auto; }
+  #choix button { display: block; width: 100%; min-height: 48px; text-align: left; background: none; border: 0; border-radius: 0;
+    border-bottom: 1px solid var(--ligne); color: var(--texte); padding: 12px 4px; font-size: 16px; }
+  .choix-groupe { position: sticky; top: 0; background: var(--carte); color: var(--doux); font-size: 13px; text-transform: uppercase;
+    letter-spacing: .04em; padding: 10px 4px 4px; }
   .choix button { display: block; width: 100%; text-align: left; background: none; border: 0;
     border-bottom: 1px solid var(--ligne); color: var(--texte); padding: 12px 4px; font-size: 16px; }
   .choix button span { color: var(--doux); font-size: 13px; }

@@ -1709,20 +1709,36 @@ $("#fiche").addEventListener("click", (ev) => {
 // Ajouter un exercice hors programme : la liste du PC, ou un nom libre (le PC le signalera).
 // Pour remplacer un exercice (machine prise, d'après openGym) : ceux du même muscle d'abord.
 let remplace = null;
+// La liste du dialogue : nom, alias (« pec fly » → Écarté machine) ou groupe, sans tenir compte des accents ; les alias
+// servent à chercher mais ne s'affichent pas. Groupée par muscle ; en remplacement, le muscle de l'origine d'abord
+// (sans elle), puis les autres dans l'ordre du PC.
+function listeAjout(q, origine) {
+  const plat = (s) => (s || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  const qp = plat((q || "").trim());
+  const groupes = [];
+  for (const x of ctx?.exercices || []) {
+    if (x.nom === origine) continue;
+    if (qp && !(plat(x.nom).includes(qp) || plat(x.alias).includes(qp) || plat(x.groupe).includes(qp))) continue;
+    const g = x.groupe || "autres";
+    let e = groupes.find((y) => y.groupe === g);
+    if (!e) groupes.push(e = { groupe: g, noms: [] });
+    e.noms.push(x.nom);
+  }
+  const g0 = origine ? groupeDe(origine) : null;
+  const i = groupes.findIndex((y) => y.groupe === g0);
+  if (i > 0) groupes.unshift(...groupes.splice(i, 1));
+  return groupes;
+}
 function ouvrirAjout(origine = null) {
   const dlg = $("#ajout"), champ = $("#cherche");
   remplace = origine;
-  const g = origine ? groupeDe(origine) : null;
   $("#ajout-titre").textContent = origine ? `Remplacer ${origine}` : "Ajouter un exercice";
   const rendu = () => {
-    const q = champ.value.trim().toLowerCase();
-    // Nom, alias (« pec fly » → Écarté machine) ou groupe, sans tenir compte des accents.
-    const plat = (s) => (s || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-    const qp = plat(q);
-    const liste = (ctx?.exercices || []).filter((x) => x.nom !== origine && (q ? plat(x.nom).includes(qp)
-      || plat(x.alias).includes(qp) || plat(x.groupe).includes(qp) : !g || x.groupe === g));
-    $("#choix").innerHTML = liste.map((x) => `<button data-choix="${esc(x.nom)}">${esc(x.nom)} <span>${esc(x.groupe)}${x.alias ? ` · ${esc(x.alias)}` : ""}</span></button>`).join("")
-      + (q && !liste.some((x) => x.nom.toLowerCase() === q) ? `<button data-choix="${esc(champ.value.trim())}">+ « ${esc(champ.value.trim())} »</button>` : "");
+    const saisie = champ.value.trim(), liste = listeAjout(saisie, origine);
+    $("#choix").innerHTML = liste.map((g) => `<div class="choix-groupe">${esc(g.groupe)}</div>`
+      + g.noms.map((n) => `<button data-choix="${esc(n)}">${esc(n)}</button>`).join("")).join("")
+      + (saisie && !liste.some((g) => g.noms.some((n) => n.toLowerCase() === saisie.toLowerCase()))
+        ? `<button data-choix="${esc(saisie)}">+ « ${esc(saisie)} »</button>` : "");
   };
   champ.value = ""; rendu(); champ.oninput = rendu;
   dlg.showModal(); if (!origine) champ.focus();   // pour remplacer, la liste d'abord, sans clavier
@@ -1739,7 +1755,7 @@ $("#choix").addEventListener("click", (ev) => {
     if (o && !o.series?.length && !o.ech?.length) s.exos = s.exos.filter((x) => x !== o);
     remplace = null;
   }
-  ouvert = nom; $("#ajout").close(); sauver(); dessiner();
+  allerExercice(nom); $("#ajout").close(); sauver(); dessiner();
 });
 $("#fermer-ajout").addEventListener("click", () => $("#ajout").close());
 
