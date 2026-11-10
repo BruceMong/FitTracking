@@ -17,11 +17,11 @@
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
   html, body { margin: 0; background: var(--bg); color: var(--texte);
     font: 16px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
-  body { padding: env(safe-area-inset-top) 16px calc(96px + env(safe-area-inset-bottom)); }
+  body { padding: env(safe-area-inset-top) 16px calc(76px + env(safe-area-inset-bottom)); }
   /* Minuteur ouvert : assez de place sous la page pour faire défiler la saisie au-dessus de lui. */
-  body:has(.minuteur.actif) { padding-bottom: calc(350px + env(safe-area-inset-bottom)); }
+  body:has(.minuteur.actif) { padding-bottom: calc(410px + env(safe-area-inset-bottom)); }
   header { display: flex; align-items: baseline; justify-content: space-between; padding: 14px 0 6px; }
-  h1 { font-size: 26px; margin: 0; }
+  h1 { font-size: 22px; margin: 0; }
   .etat { font-size: 13px; color: var(--doux); }
   .etat.ok { color: var(--vert); } .etat.attente { color: var(--jaune); } .etat.erreur { color: var(--rouge); }
   .sous { color: var(--doux); font-size: 14px; }
@@ -60,7 +60,7 @@
   .pause { color: var(--doux); font-size: 14px; }
   .alerte { color: var(--jaune); }
   /* Minuteur de repos (« .repos » est déjà pris par le conseil du jour : renommé). */
-  .minuteur { position: fixed; left: 12px; right: 12px; bottom: calc(12px + env(safe-area-inset-bottom));
+  .minuteur { position: fixed; left: 12px; right: 12px; bottom: calc(68px + env(safe-area-inset-bottom));
     background: var(--carte2); border-radius: 18px; padding: 12px 14px 14px; display: none;
     box-shadow: 0 8px 30px rgba(0,0,0,.7); }
   .minuteur.actif { display: block; }
@@ -94,11 +94,14 @@
     background: var(--carte); color: var(--texte); border: 1px solid var(--ligne); border-radius: 10px; }
   .accueil button { padding: 12px 18px; font-size: 16px; border-radius: 10px; border: 0; background: var(--texte); color: var(--carte); }
   .accueil .erreur { color: #e5484d; }
-  .onglets { display: flex; gap: 6px; background: var(--carte); border-radius: 12px; padding: 4px; margin: 4px 0 8px; }
-  .onglets button { flex: 1; border: 0; background: none; color: var(--doux); padding: 8px 0; border-radius: 9px; font-size: 15px; }
-  .onglets button.choisi { background: var(--carte2); color: var(--texte); font-weight: 600; }
-  .echelle { display: grid; grid-template-columns: repeat(11, 1fr); gap: 4px; margin-top: 8px; }
-  .echelle button { height: 38px; border: 0; border-radius: 8px; background: var(--carte2); color: var(--texte); font-size: 15px; padding: 0; }
+  /* Barre d'onglets fixée en bas : sous le pouce, au-dessus du geste système. */
+  .onglets { position: fixed; left: 0; right: 0; bottom: 0; z-index: 30; display: flex; background: var(--bg);
+    border-top: 1px solid var(--ligne); padding-bottom: env(safe-area-inset-bottom); }
+  .onglets button { flex: 1; height: 56px; border: 0; background: none; color: var(--doux); font-size: 15px; touch-action: manipulation; }
+  .onglets button.choisi { color: var(--bleu); font-weight: 600; }
+  /* Douleur 0 à 10 : deux lignes de six, pour des boutons de 44 px au moins. */
+  .echelle { display: grid; grid-template-columns: repeat(6, 1fr); gap: 6px; margin-top: 8px; }
+  .echelle button { height: 48px; border: 0; border-radius: 8px; background: var(--carte2); color: var(--texte); font-size: 15px; padding: 0; }
   .echelle button.choisi { color: #000; font-weight: 700; }
   .ligne2 { display: flex; gap: 8px; align-items: center; margin-top: 8px; }
   .ligne2 input { flex: 1; height: 44px; border-radius: 10px; border: 1px solid var(--ligne); background: var(--bg);
@@ -175,8 +178,10 @@
   #fiche ol.f-etapes b { display: block; }
   /* Fiche d'exercice : le « i » à côté du nom, la bulle qui s'ouvre */
   .exo h3 .nom { display: flex; align-items: center; gap: 8px; min-width: 0; }
-  .info { flex: none; width: 22px; height: 22px; border-radius: 50%; border: 1px solid var(--doux); background: none;
+  /* Le rond visible reste à 22 px ; la zone tactile fait 44 px (le pseudo-élément déborde sans bouger la mise en page). */
+  .info { flex: none; position: relative; width: 22px; height: 22px; border-radius: 50%; border: 1px solid var(--doux); background: none;
     color: var(--doux); font: italic 600 13px/1 Georgia, serif; padding: 0; }
+  .info::after { content: ""; position: absolute; left: 50%; top: 50%; width: 44px; height: 44px; transform: translate(-50%, -50%); }
   #fiche { padding: 12px; }
   /* Séance : avancement, récupération, étiquettes, séries prévues, réserve */
   .avance { margin: 10px 0 2px; }
@@ -305,7 +310,7 @@
   #flash { position: fixed; inset: 0; background: var(--vert); opacity: 0; pointer-events: none; z-index: 50; }
   #flash.on { animation: flash .45s ease-in-out 3; }
   @keyframes flash { 50% { opacity: .5; } }
-  #toast { position: fixed; left: 12px; right: 12px; bottom: calc(150px + env(safe-area-inset-bottom)); background: var(--texte); color: #000;
+  #toast { position: fixed; left: 12px; right: 12px; bottom: calc(206px + env(safe-area-inset-bottom)); background: var(--texte); color: #000;
     border-radius: 12px; padding: 10px 14px; display: none; align-items: center; justify-content: space-between; gap: 10px; z-index: 40; font-size: 15px; }
   #toast.vu { display: flex; }
   #toast button { border: 0; background: none; color: var(--bleu); font-weight: 700; font-size: 15px; padding: 6px 0; }
@@ -333,9 +338,12 @@
   #fiche ol { margin: 10px 0 6px; padding-left: 20px; font-size: 15px; }
   #fiche ol li { margin-bottom: 4px; }
   /* Lecteur de musique (mp3 privés, dans le navigateur) */
-  .miniplayer { display: none; position: sticky; top: 0; z-index: 6; align-items: center; gap: 8px;
-    background: var(--carte); border-radius: 12px; padding: 6px 10px; margin: 0 0 8px; }
+  .miniplayer { display: none; position: fixed; left: 16px; right: 16px; bottom: calc(64px + env(safe-area-inset-bottom)); z-index: 29; align-items: center; gap: 8px;
+    background: var(--carte2); border-radius: 12px; padding: 6px 10px; box-shadow: 0 4px 16px rgba(0,0,0,.6); }
   .miniplayer.actif { display: flex; }
+  body:has(.miniplayer.actif):not(:has(.minuteur.actif)) { padding-bottom: calc(128px + env(safe-area-inset-bottom)); }
+  /* Minuteur ouvert : le lecteur se pose au-dessus de lui. */
+  body:has(.minuteur.actif) .miniplayer { bottom: calc(420px + env(safe-area-inset-bottom)); }
   .miniplayer button { border: 0; background: none; color: var(--texte); font-size: 20px; padding: 4px; line-height: 1; }
   .miniplayer .play { font-size: 24px; }
   .miniplayer .titre { flex: 1; min-width: 0; font-size: 14px; color: var(--doux); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -501,7 +509,6 @@
   <h1 id="titre">FitTracking</h1>
   <span id="etat" class="etat"></span>
 </header>
-<div class="onglets"><button data-onglet="seance" class="choisi">Séance</button><button data-onglet="sante">Santé</button><button data-onglet="progres">Progrès</button><button data-onglet="musique">Musique</button></div>
 <div class="miniplayer" id="miniplayer"></div>
 <main id="app"></main>
 <div id="version" class="version"></div>
@@ -529,6 +536,7 @@
   <div id="fiche-contenu"></div>
   <button class="lien" id="fermer-fiche">Fermer</button>
 </dialog>
+<div class="onglets"><button data-onglet="seance" class="choisi">Séance</button><button data-onglet="sante">Santé</button><button data-onglet="progres">Progrès</button><button data-onglet="musique">Musique</button></div>
 <script type="module" src="app.js"></script>
 </body>
 </html>
