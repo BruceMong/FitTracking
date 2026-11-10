@@ -410,7 +410,12 @@
   .g-outils { flex: none; display: flex; gap: 6px; margin-left: 4px; }
   #grand .g-outils button { font-size: 22px; }
   /* Sous l'en-tête : la dernière fois, la cible (information, pas un lien : pas de bleu), le record, le mémo. */
-  .g-infos { display: flex; flex-direction: column; gap: 2px; font-size: clamp(13px, 3.8vw, 15px); line-height: 1.35; opacity: .8; }
+  .g-infos { display: flex; flex-direction: column; gap: 2px; font-size: clamp(13px, 3.8vw, 15px); line-height: 1.35; opacity: .8;
+    flex: 0 1 auto; min-height: 0; overflow: hidden; }
+  /* Le réglage passe avant les infos : faute de place, ce sont elles qui rétrécissent (lignes coupées), jamais les
+     − / + qui débordent sur « Série faite » (un appui sur leur bas validerait une série). */
+  .g-milieu:has(> .g-ligne) { flex-shrink: 0; min-height: auto; }
+  .g-pastilles { flex-shrink: 0; }
   .g-infos > div { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .g-info { color: #f2f2f7; opacity: 1; }
   .g-info.decharge { color: var(--jaune); }
@@ -454,6 +459,8 @@
   .g-quatre .g-second, .g-trois .g-second { height: clamp(48px, 9vh, 68px); font-size: clamp(14px, 4.2vw, 18px); padding: 0 4px; white-space: nowrap; }
   #grand .g-principal { flex: 2; min-height: clamp(60px, 15vh, 120px); padding: 0 8px; background: var(--vert); border-color: var(--vert); color: #04130a; font-size: clamp(21px, 7.5vw, 36px); font-weight: 800; }
   #grand .g-second { height: clamp(48px, 9vh, 68px); }
+  /* Exercice fini : « Exercice suivant › » à la hauteur de « + une série ». */
+  #grand .g-actions:has([data-g=une-de-plus]) .g-second { height: auto; align-self: stretch; min-height: 48px; }
   #grand .g-trois .g-principal { flex: 1.3; }
   #grand .g-trois .g-second { white-space: normal; line-height: 1.1; align-self: stretch; height: auto; min-height: 48px; }
   #grand .g-go { min-height: clamp(64px, 20vh, 150px); background: #fff; border-color: #fff; color: #000; font-size: clamp(28px, 11vw, 60px); font-weight: 800; }
@@ -468,11 +475,14 @@
   }
   /* Fenêtre courte : une chose à la fois, la question de la réserve d'abord. */
   @media (max-height: 620px) {
+    /* Les pastilles sur une ligne, qui défile sous le doigt ; la prochaine est amenée à l'écran (majGrand). */
+    .g-pastilles { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
+    #grand .g-pastilles button { flex: none; }
     #grand .g-zone.question .g-ligne { display: none; }
     .g-zone:not(.question) .g-reserve { display: none; }
   }
   @media (max-height: 430px) {
-    .g-reserve span, .g-reserve small, .g-val small, #grand .g-lien { display: none; }
+    .g-reserve span, .g-reserve small, .g-val small, #grand .g-lien, .g-record, .g-memo { display: none; }
     .g-titre span { font-size: 12px; }
     #grand .g-ajuste { display: none; }
     .g-tete { min-height: 40px; }
@@ -482,7 +492,8 @@
   @media (max-height: 430px) and (min-width: 380px) {
     #grand .g-milieu .g-ligne { flex-direction: row; }
     .g-milieu .g-pm { flex: 1 1 0; }
-    .g-val b { font-size: clamp(22px, 7vw, 30px); }   /* « pdc » ou « 42,5 » tient entre ses − / + */
+    .g-pm { grid-template-columns: 56px minmax(0, 1fr) 56px; }   /* − / + de 56 px au moins, en largeur aussi */
+    .g-val b { font-size: clamp(20px, 6vw, 28px); }   /* « pdc » ou « 42,5 » tient entre ses − / + */
   }
   @media (max-height: 340px) {
     #g-corps:has(.g-zone.question) .g-milieu .g-ligne { display: none; }   /* superset : la réserve d'abord */
