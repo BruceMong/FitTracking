@@ -18,7 +18,7 @@ service worker) pour noter ses séries au téléphone, à la salle, même sans r
   « contexte » : séance du jour selon la rotation push / pull / legs, dernière fois et cible de
   chaque exercice (double progression), conseil d'intensité tiré de la montre.
 
-- **Santé** : les données de la montre et les calculs du panneau Santé du PC — alertes, dernière nuit
+- **Santé** (en sections repliables : Aujourd'hui avec le ressenti, la douleur à l'épaule, le poids, les photos et le repas, puis rapport, objectifs et courbes, repliées par défaut) : les données de la montre et les calculs du panneau Santé du PC — alertes, dernière nuit
   (durée, horaires, phases, score), VFC, FC au repos, Body Battery, stress, SpO2, respiration, semaine en
   cours (pas, séances, minutes intensives), dette et régularité du sommeil, ressenti noté, objectifs, et
   les courbes sur 30 ou 90 jours (poids, sommeil, VFC, FC, Body Battery, stress, pas, coucher).
@@ -37,18 +37,22 @@ service worker) pour noter ses séries au téléphone, à la salle, même sans r
   ouvre le geste en détail : étapes, quantités, temps, astuces, à éviter. Textes dans `fiches.js` (`SOINS`, clé = clé de
   la case envoyée par `carnet-sync`), tirés de `sante/peau/README.md`. Tant que le gel nettoyant est à acheter, l'étape 1
   dit eau tiède.
-- **Saisie en lignes** (sur le modèle d'openGym) : carte ouverte, une ligne par série, faites puis prévues,
-  pré-remplies (la cible, puis la ligne d'avant). Chaque ligne a ses − / + : la charge au pas de l'exercice (le plus
-  petit écart entre deux charges déjà notées, un cran de machine ; 2,5 kg sans historique), les répétitions une par une,
-  et un champ pour taper la valeur. Une ligne prévue réglée fait suivre les suivantes ; une série faite se corrige en
-  place. Le rond de la prochaine ligne la valide ; « @? » d'une série faite ouvre sa réserve et « Retirer ».
+- **Barre d'onglets** : Séance, Santé, Progrès, Musique, fixe en bas de l'écran (56 px, cible tactile pleine).
+- **Séance, deux vues** : l'onglet s'ouvre sur la vue **Exercice** (voir plus bas), ☰ bascule sur la **Liste** (une carte
+  allégée par exercice : nom, dernière fois, mémo, cible, pastilles de séries ; un toucher sur la carte ouvre l'exercice).
+  « Ajouter un exercice » est en bas de la Liste.
+- **Pastilles et feuille de série** : chaque série est une pastille (faite, prévue, échauffement). La toucher ouvre une
+  feuille collée en bas : charge et répétitions en − / + (ou tapées), réserve 0 à 4+, « Retirer la série ». Une série
+  faite se corrige donc en place, même pendant le repos (la pastille passe sur une ligne sous le titre).
+- **Menu ⋯ de l'exercice** : fiche, remplacer, + une série, + échauffement, superset avec le partenaire, compter en
+  secondes ou en répétitions (sans charge), hors progression, mémo, note.
 - **Échauffement** : « + échauffement » ajoute une ligne `é` (la moitié de la charge × 10, puis les trois quarts × 5),
   repos d'une minute. Gardé à part (`ech`), écrit entre parenthèses dans seances.md : hors volume, récupération et cible.
 - **Hors progression** : un exercice, ou toute la séance, un jour de douleur ou sans forme. Compté pour le volume et la
   récupération, pas pour la cible, les records ni les courbes (`(hors progression)` dans seances.md, lu par le panneau).
-- **Superset** : les paires de `programme.md` s'enchaînent (une série de chacun, puis 120 s de repos). L'étiquette
-  « ⚡ superset · X ✕ » de la carte coupe la paire pour la journée (« réactiver » la rebranche) : chaque exercice se fait
-  alors seul, avec son repos normal. Même effet que « Sans superset » pendant l'enchaînement. Gardé par jour sur le téléphone.
+- **Superset** : désactivé par défaut. Pour un exercice qui a un partenaire dans `programme.md`, « Superset avec X » (menu ⋯,
+  ou l'étiquette « superset · activer » de la carte) l'active pour la journée : une série de chacun, puis 120 s de repos.
+  « Sans superset » pendant l'enchaînement, ou la même case décochée, coupe la paire. Gardé par jour sur le téléphone.
 - **Remplacer** (machine prise) : les exercices du même muscle d'abord ; le remplaçant prend la place dans la séance.
 - **Bilan de la séance** (sous les exercices) : chaque exercice face à la dernière fois (↑ = ↓), la cible de la
   prochaine séance tirée de la même règle, les records battus, séries et durée.
@@ -57,7 +61,10 @@ service worker) pour noter ses séries au téléphone, à la salle, même sans r
 - **Pendant la séance** : avancement (séries faites sur prévues, durée), séries restantes en pointillé à la
   charge prévue, étiquettes du muscle (avec sa fatigue) et du record. Sous le minuteur de repos, « Combien tu aurais
   pu en faire de plus ? » (0 à 4+, facultatif) : la réserve est écrite `@N` dans seances.md. L'écran clignote à la fin du
-  repos ; carnet en arrière-plan, une notification la signale (service worker, sans serveur, repos de 5 min au plus). Glisser une série vers la gauche la retire (Annuler), vers la droite la recopie.
+  repos ; carnet en arrière-plan, une notification la signale (service worker, sans serveur, repos de 5 min au plus).
+  Dans la Liste, le repos tient sur une ligne (exercice, chrono, Passer) au-dessus de la barre d'onglets. Glisser une série
+  vers la gauche la retire (Annuler), vers la droite la recopie. Changer le type du jour (Push, Pull, Legs) après des
+  séries notées demande un second toucher (3 s).
 - **Cible** : double progression, comme le panneau ; deux crans si tout est tenu avec 3 en réserve ; trois
   séances sans progrès : décharge à −10 % signalée par le PC, puis on remonte.
 - **Récupération par muscle** : 8 séries difficiles font une dose, effacée de moitié en 24 h (bras, épaules),
@@ -73,13 +80,13 @@ service worker) pour noter ses séries au téléphone, à la salle, même sans r
   récupération, muscles négligés (jours depuis la dernière série). Santé : le poids en moyenne par semaine.
   charge), douleur à l'épaule, allure de course.
 - Les courbes sont en SVG écrit à la main, sans bibliothèque, pour marcher hors ligne.
-- **Grand format** (facultatif, depuis le 2026-11-06) : tout le menu de série en plein écran, pour le lire et le toucher dans
-  une fenêtre réduite, à côté d'une autre appli. S'ouvre par l'icône du minuteur ou « Grand format » dans une carte ouverte ;
-  reste actif de repos en repos jusqu'à ce qu'on le referme (icône, ou geste retour). Quatre états : `repos` (toute la fenêtre
+- **Vue Exercice** (vue d'ouverture de la Séance ; c'était le « grand format » facultatif du 2026-11-06) : tout le menu de série en plein écran, pour le lire et le toucher dans
+  une fenêtre réduite, à côté d'une autre appli. Reste active de repos en repos ; ☰ passe à la Liste, l'icône du minuteur
+  ou un toucher sur une carte en revient. Quatre états : `repos` (toute la fenêtre
   sert de jauge, verte dans les 10 dernières secondes), `fini` (clignote en vert à 1 Hz, fixe après 90 s ou si l'animation est
   réduite), `serie` (− / + et « Série faite »), `fin` (dernier exercice de la séance). Entre deux exercices, pas d'arrêt : à la dernière série, le
   repos de transition (2:00) part tout seul et l'écran annonce déjà le suivant, dans l'ordre du programme ; « + une série » reste sur
-  l'exercice, et ‹ › en choisit un autre si la machine est prise. Il réutilise les boutons de l'appli : une série
+  l'exercice, et ‹ › en choisit un autre si la machine est prise. Une série
   notée ici est une série comme une autre. Les tailles suivent la fenêtre, et les paliers de hauteur (620, 430, 340, 300, 240 px)
   retirent le secondaire. Tester : jamais sur le port 9333 (ZapZap) ni 9222 (Chrome de Bruce).
 - **Montre** (réglage « Valider depuis la montre », onglet Séance, depuis le 2026-11-07) : à la fin de chaque repos, la
