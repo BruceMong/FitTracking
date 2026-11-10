@@ -2672,14 +2672,14 @@ function reglageGrand(nom) {
 
 // Les pastilles des séries de l'exercice, échauffements d'abord : faite (fond vert, « 52×6 », « @2 » si la réserve
 // est notée), prochaine (entourée), prévue (pointillés). La tâche qui suit les branche (data-pastille).
-function pastillesGrand(nom) {
+function pastillesGrand(nom, compact = false) {
   const { L, W, k0 } = lignesDe(nom), k0e = W.findIndex((w) => !w.fait), ech = k0e >= 0;
   const p = (l, e) => {
     const cls = l.fait ? "fait" : (e ? l.k === k0e : !ech && l.k === k0) ? "prochaine" : "prevue";
     const res = !e && l.fait && l.e != null ? `<small>@${l.e === 4 ? "4+" : l.e}</small>` : "";
-    return `<button class="${cls}" data-pastille="${l.k}" ${e ? 'data-ech="1"' : ""} aria-label="${e ? "Échauffement" : `Série ${l.k + 1}`}">${e ? "é " : ""}${serieTxt(nom, l.c, l.r)}${res}</button>`;
+    return `<button class="${cls}" data-pastille="${l.k}" data-pn="${esc(nom)}" ${e ? 'data-ech="1"' : ""} aria-label="${e ? "Échauffement" : `Série ${l.k + 1}`}">${e ? "é " : ""}${serieTxt(nom, l.c, l.r)}${res}</button>`;
   };
-  return `<div class="g-pastilles">${W.map((l) => p(l, true)).join("")}${L.map((l) => p(l, false)).join("")}</div>`;
+  return `<div class="g-pastilles${compact ? " compact" : ""}">${W.map((l) => p(l, true)).join("")}${L.map((l) => p(l, false)).join("")}</div>`;
 }
 
 function corpsGrand(etat) {
@@ -2727,12 +2727,14 @@ function corpsGrand(etat) {
   }
   if (etat === "fin" && !nom) {
     return `<div class="g-tete"><div class="g-titre"><b>${esc(minu.nom)}</b><span>dernier exercice de la séance</span></div>${outils(false)}</div>
+      ${pastillesGrand(minu.nom, true)}
       <div class="g-milieu"><div class="g-bravo">✓</div></div>
       ${zone(false)}
       <div class="g-actions"><button class="g-principal" data-g="go">Terminer</button></div>`;
   }
   if (etat === "fin") {
     return `<div class="g-tete"><div class="g-titre"><b>${esc(minu.nom)}</b><span>exercice terminé</span></div>${outils(false)}</div>
+      ${pastillesGrand(minu.nom, true)}
       <div class="g-milieu"><div class="g-bravo">✓</div><div class="g-ensuite">Ensuite : <b>${esc(nom)}</b></div></div>
       ${zone(false)}
       <div class="g-actions g-trois"><button class="g-principal" data-min="repos2">Repos 2:00</button><button class="g-second" data-min="repos1">1:30</button>
@@ -2746,6 +2748,7 @@ function corpsGrand(etat) {
   const etatRepos = etat === "fini" ? "repos terminé" : minu.restant != null ? "repos en pause" : "repos";
   const sous = change ? [`exercice suivant · ${cibleTxt(nom)}`, memo(nom)].filter(Boolean).join(" · ") : etatRepos;
   const tete = `<div class="g-tete"><div class="g-titre"><b>${esc(change ? nom : minu.nom)}</b><span>${esc(sous)}</span></div>${outils(false)}</div>
+    ${pastillesGrand(minu.nom, true)}
     <div class="g-milieu"><div class="g-chrono" id="g-chrono"></div><div class="g-ensuite">${ensuite}</div>
       ${change ? `<button class="g-lien" data-g="plus">+ une série de ${esc(minu.nom)}</button>` : ""}</div>`;
   if (etat === "fini") return `${tete}${zone(false)}<div class="g-actions"><button class="g-go" data-g="go">Go</button></div>`;
@@ -2787,7 +2790,7 @@ function clicGrand(ev) {
   if (g === "menu") { const nom = exoAffiche(); if (nom) ouvrirFeuille(menuExo(nom), { quoi: "menu", nom }); return; }
   const pastille = ev.target.closest("[data-pastille]");
   if (pastille?.dataset.pastille != null) {
-    const nom = exoAffiche(), k = Number(pastille.dataset.pastille), ech = !!pastille.dataset.ech;
+    const nom = pastille.dataset.pn || exoAffiche(), k = Number(pastille.dataset.pastille), ech = !!pastille.dataset.ech;
     if (nom) ouvrirFeuille(feuilleSerie(nom, k, ech), { quoi: "serie", nom, k, ech });
     return;
   }

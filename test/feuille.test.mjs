@@ -36,14 +36,25 @@ test("menu ⋯ : la case du superset suit la paire", async () => {
   const c = await chargerCarnet({ stockage: avecCtxSansSs() });
   assert.doesNotMatch(c.json(`menuExo(${q(TRI)})`), /f-case on/);
 });
-test("corriger une série faite pendant le repos", async () => {
-  const b = await chargerCarnet({ stockage: avecCtx() });
-  b.evaluer(`validerSerie(${q(DC)})`);
+test("corriger une série faite pendant le repos : pastilles à l'écran, plan corrigé envoyé à la montre", async () => {
+  const b = await chargerCarnet({ stockage: avecCtx({ "carnet:cle": "cle-essai" }), pont: {} });
+  b.evaluer(`validerSerie(${q(DC)}); dessiner()`);
   const fin = b.json("minu.fin");
-  b.evaluer(`regler(${q(DC)}, 0, false, "r", 5); dessiner()`);
-  assert.equal(b.json("seanceDuJour().exos[0].series[0].r"), 5);
+  // les pastilles de l'exercice sont sur l'écran du repos, avec le nom de leur exercice
+  const h = b.json(`corpsGrand("repos")`);
+  assert.equal((h.match(/data-pastille=/g) || []).length, 4);
+  assert.match(h, /data-pn="Développé couché guidé"/);
+  assert.match(h, /g-pastilles compact/);
+  b.pont.vider();
+  // corriger la charge de la série faite : les séries qui suivent la reprennent, la montre en est prévenue
+  b.evaluer(`regler(${q(DC)}, 0, false, "c", 50); dessiner()`);
+  assert.equal(b.json("seanceDuJour().exos[0].series[0].c"), 50);
   assert.equal(b.json("minu.fin"), fin);
   assert.equal(b.json("minu.mode"), "repos");
+  const plans = b.pont.envoyes.filter((x) => x.cle === "plan");
+  assert.equal(plans.length, 1);
+  assert.deepEqual(plans[0].message.e[0].slice(0, 4), [0, 1, 50, 6]);   // série 2 : 50 kg × 6
+  assert.equal(plans[0].message.v, b.json("pontV"));
 });
 test("la feuille ouverte garde son sujet et se rafraîchit", async () => {
   const b = await chargerCarnet({ stockage: avecCtx({ "carnet:cle": "cle-essai" }) });
