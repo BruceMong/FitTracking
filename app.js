@@ -1016,6 +1016,48 @@ function journalDuJour() {
   return j;
 }
 
+// ───────────────────────────────────────── sections repliables
+
+// Un intertitre à toucher (chevron) suivi du corps, sauf quand la section est repliée. L'état de chaque
+// section est gardé dans carnet:replie ({ id: true|false }) ; sans choix, celui par défaut ci-dessous.
+// Le corps peut être une fonction : une section repliée ne construit pas ce qu'elle ne montre pas.
+const REPLIE_PAR_DEFAUT = { courbes: true, "rapport-tableau": true };
+const estReplie = (id, defaut = REPLIE_PAR_DEFAUT[id] === true) => lire("carnet:replie", {})[id] ?? defaut;
+function basculerReplie(id) {
+  ecrire("carnet:replie", { ...lire("carnet:replie", {}), [id]: !estReplie(id) });
+}
+function section(id, titre, corps, replieDefaut = REPLIE_PAR_DEFAUT[id] === true) {
+  const ferme = estReplie(id, replieDefaut);
+  return `<button class="section-tete" data-replie="${id}" aria-expanded="${!ferme}"><span>${titre}</span><i class="chevron">${ferme ? "▸" : "▾"}</i></button>`
+    + (ferme ? "" : typeof corps === "function" ? corps() : corps);
+}
+
+// Épaule droite : la douleur du jour règle la réintroduction des exercices en pause.
+function carteEpaule(s) {
+  const dl = s.douleur;
+  return `<div class="carte"><b>Épaule droite</b> <span class="sous">douleur aujourd'hui, de 0 à 10</span>
+    <div class="echelle">${Array.from({ length: 11 }, (_, i) => `<button data-douleur="${i}" class="${dl === i ? "choisi" : ""}"
+      style="${dl === i ? `background:${i <= 1 ? "var(--vert)" : i <= 3 ? "var(--jaune)" : "var(--rouge)"}` : ""}">${i}</button>`).join("")}</div></div>`;
+}
+function cartePoids(s) {
+  const pes = ctx?.pesees?.length ? ctx.pesees[ctx.pesees.length - 1] : null;
+  const vieille = !pes || (new Date(jour) - new Date(pes[0])) / 864e5 > 7;
+  return `<div class="carte"><b>Poids</b> <span class="sous">${pes ? `dernier : ${String(pes[1]).replace(".", ",")} kg le ${jj(pes[0])}` : "aucune pesée"}
+      ${vieille && !s.poids ? ' · <span class="alerte">pesée de la semaine</span>' : ""}</span>
+    <div class="ligne2"><input id="poids" inputmode="decimal" placeholder="kg, le matin à jeun" value="${s.poids ? String(s.poids).replace(".", ",") : ""}">
+      <button data-poids-ok>OK</button></div></div>`;
+}
+function cartePhotos() {
+  const nPhotos = lire("carnet:photos", []).length;
+  const dp = ctx?.photo_derniere;
+  const aRefaire = !dp || (new Date(jour) - new Date(dp)) / 864e5 >= 28;
+  return `<div class="carte"><b>Photos de suivi</b> <span class="sous">${dp ? `dernières le ${jj(dp)}` : "aucune encore"}${aRefaire ? ' · <span class="alerte">à faire</span>' : ""}
+      ${nPhotos ? ` · ${nPhotos} en attente d'envoi` : ""}</span>
+    <div class="sous" style="margin-top:6px">Lumière naturelle, même endroit, toutes les 4 semaines.</div>
+    <div class="ligne2"><button data-photo="posture-profil">Posture de profil</button><button data-photo="peau">Peau</button>
+      <button data-photo="autre">Autre</button></div></div>`;
+}
+
 function aujourdhuiSante() {
   const S = ctx?.sante, j = journalDuJour();
   const routine = S?.routine || [];
@@ -1038,7 +1080,8 @@ function aujourdhuiSante() {
         return SOINS[r.cle] ? `<div class="case-ligne">${c}<button class="info" data-soin="${esc(r.cle)}" aria-label="Comment faire">i</button></div>` : c; }).join("")
       + `</div>`;
   }
-  return h;
+  const s = seanceDuJour();
+  return h + carteEpaule(s) + cartePoids(s) + cartePhotos();
 }
 
 // ───────────────────────────────────────── repas photographiés
@@ -1154,16 +1197,16 @@ function carteRapport() {
   const i = Math.min(rapportChoisi, R.length - 1), r = R[i], avant = R[i + 1];
   const age = Math.round((new Date(jour) - new Date(r.jour)) / 864e5);
   const ind = indicateurs(r.md), ind0 = avant ? indicateurs(avant.md) : {};
-  let h = `<div class="carte rapport"><div class="c-tete"><b>Rapport sport</b>
-    <span class="sous">${quand(r.jour)}${age > 1 ? ` · il y a ${age} j` : ""}${i ? "" : " · le dernier"}</span></div>`;
+  let h = `<div class="carte rapport"><div class="c-tete"><b>${i ? "Rapport précédent" : "Dernier rapport"}</b>
+    <span class="sous">${quand(r.jour)}${age > 1 ? ` · il y a ${age} j` : ""}</span></div>`;
   const bref = sectionMd(r.md, "En bref");
   if (bref) h += `<div class="md">${md(bref)}</div>`;
   const lignes = Object.entries(ind);
   if (lignes.length) {
-    h += `<div class="md-tab"><table class="rp-ind"><thead><tr><th></th><th>${jj(r.jour)}</th>${avant ? `<th>${jj(avant.jour)}</th>` : ""}</tr></thead><tbody>`
+    h += section("rapport-tableau", "Tableau comparatif", `<div class="md-tab"><table class="rp-ind"><thead><tr><th></th><th>${jj(r.jour)}</th>${avant ? `<th>${jj(avant.jour)}</th>` : ""}</tr></thead><tbody>`
       + lignes.map(([k, x]) => `<tr><td>${mdEnLigne(k)}${x.c ? `<span class="sous">cible ${mdEnLigne(x.c)}</span>` : ""}</td>
         <td>${mdEnLigne(x.v)}</td>${avant ? `<td class="sous">${mdEnLigne(ind0[k]?.v ?? "–")}</td>` : ""}</tr>`).join("")
-      + `</tbody></table></div>`;
+      + `</tbody></table></div>`);
   }
   if (rapportOuvert) {
     const reste = r.md.replace(/^# .*\n/, "").replace(/^## (En bref|Indicateurs)\s*\n[\s\S]*?(?=^## )/gm, "");
@@ -1183,90 +1226,98 @@ function sante() {
   let h = "";
 
   for (const a of S.alertes || []) h += `<div class="carte alerte-carte">${esc(a)}</div>`;
-  h += aujourdhuiSante();
-  h += carteRapport();
-  h += carteRepas();
+  h += section("aujourdhui", "Aujourd'hui", () => aujourdhuiSante() + carteRepas());
+  const rapport = carteRapport();
+  if (rapport) h += section("rapport", "Rapport sport", rapport);
+  h += section("nuit", "Ta nuit et tes indicateurs", () => {
+    let h = "";
+    // La dernière nuit connue : durée face à la cible, horaires, phases.
+    const n = dernier("sommeil");
+    if (n) {
+      const ph = [["profond", "Profond", "#5e5ce6"], ["leger", "Léger", "#0a84ff"], ["paradoxal", "Paradoxal", "#64d2ff"], ["eveil", "Éveil", "#ff9f0a"]]
+        .filter(([k]) => n[k]);
+      const tot = ph.reduce((s, [k]) => s + n[k], 0) || 1;
+      const ok = n.sommeil >= C.sommeil, court = n.sommeil < C.sommeil - 60;
+      h += `<div class="carte"><div class="c-tete"><b>Nuit</b><span class="sous">${quand(n.j)}${n.couche ? ` · ${n.couche} → ${n.leve}` : ""}</span></div>
+        <div class="nuit"><div class="t-val grand ${ok ? "vert" : court ? "rouge" : "jaune"}">${hm(n.sommeil)}</div>
+          <div class="sous">cible ${hm(C.sommeil)}${n.score ? `<br>score <b class="score">${n.score}</b>` : ""}</div></div>
+        <div class="phases">${ph.map(([k, , c]) => `<i style="width:${(n[k] / tot * 100).toFixed(1)}%;background:${c}"></i>`).join("")}</div>
+        <div class="legende">${ph.map(([k, nom, c]) => `<span><i style="background:${c}"></i>${nom} ${hm(n[k])}</span>`).join("")}</div></div>`;
+    } else h += `<div class="carte sous">Aucune nuit enregistrée récemment : porte la montre la nuit, puis ouvre Garmin Connect pour la synchroniser.</div>`;
 
-  // La dernière nuit connue : durée face à la cible, horaires, phases.
-  const n = dernier("sommeil");
-  if (n) {
-    const ph = [["profond", "Profond", "#5e5ce6"], ["leger", "Léger", "#0a84ff"], ["paradoxal", "Paradoxal", "#64d2ff"], ["eveil", "Éveil", "#ff9f0a"]]
-      .filter(([k]) => n[k]);
-    const tot = ph.reduce((s, [k]) => s + n[k], 0) || 1;
-    const ok = n.sommeil >= C.sommeil, court = n.sommeil < C.sommeil - 60;
-    h += `<div class="carte"><div class="c-tete"><b>Nuit</b><span class="sous">${quand(n.j)}${n.couche ? ` · ${n.couche} → ${n.leve}` : ""}</span></div>
-      <div class="nuit"><div class="t-val grand ${ok ? "vert" : court ? "rouge" : "jaune"}">${hm(n.sommeil)}</div>
-        <div class="sous">cible ${hm(C.sommeil)}${n.score ? `<br>score <b class="score">${n.score}</b>` : ""}</div></div>
-      <div class="phases">${ph.map(([k, , c]) => `<i style="width:${(n[k] / tot * 100).toFixed(1)}%;background:${c}"></i>`).join("")}</div>
-      <div class="legende">${ph.map(([k, nom, c]) => `<span><i style="background:${c}"></i>${nom} ${hm(n[k])}</span>`).join("")}</div></div>`;
-  } else h += `<div class="carte sous">Aucune nuit enregistrée récemment : porte la montre la nuit, puis ouvre Garmin Connect pour la synchroniser.</div>`;
+    // Les mesures du matin, chacune à sa dernière valeur connue.
+    const v = dernier("vfc"), fc = dernier("fc"), bb = dernier("bb"), st = dernier("stress"), sp = dernier("spo2"), rs = dernier("resp");
+    const tonVfc = !v ? "" : v.vfc_bas && v.vfc < v.vfc_bas ? "jaune" : "vert";
+    const tonFc = !fc || !S.fc30 ? "" : fc.fc >= S.fc30 + 5 ? "rouge" : fc.fc > S.fc30 + 2 ? "jaune" : "vert";
+    const tonBb = !bb ? "" : bb.bb < 40 ? "rouge" : bb.bb < 70 ? "jaune" : "vert";
+    const tonSt = !st ? "" : st.stress > 50 ? "rouge" : st.stress > 25 ? "jaune" : "vert";
+    h += `<div class="tuiles">`
+      + tuile("VFC", v?.vfc, " ms", v ? (v.vfc_bas ? `habituel ${v.vfc_bas}–${v.vfc_haut}${v.j < jour ? ` · ${quand(v.j)}` : ""}` : quand(v.j)) : "", tonVfc)
+      + tuile("FC au repos", fc?.fc, " bpm", fc ? (S.fc30 ? `moyenne ${S.fc30} · ${quand(fc.j)}` : quand(fc.j)) : "", tonFc)
+      + tuile("Body Battery", bb?.bb, "", bb ? `max${bb.bb_min != null ? ` · min ${bb.bb_min}` : ""} · ${quand(bb.j)}` : "", tonBb)
+      + tuile("Stress", st?.stress, "", st ? `moyenne · ${quand(st.j)}` : "", tonSt)
+      + tuile("SpO2", sp ? Math.round(sp.spo2) : null, " %", sp ? `nuit · ${quand(sp.j)}` : "", sp ? (sp.spo2 < 92 ? "rouge" : "vert") : "")
+      + tuile("Respiration", rs ? Math.round(rs.resp) : null, " /min", rs ? `éveil · ${quand(rs.j)}` : "", "")
+      + `</div>`;
 
-  // Les mesures du matin, chacune à sa dernière valeur connue.
-  const v = dernier("vfc"), fc = dernier("fc"), bb = dernier("bb"), st = dernier("stress"), sp = dernier("spo2"), rs = dernier("resp");
-  const tonVfc = !v ? "" : v.vfc_bas && v.vfc < v.vfc_bas ? "jaune" : "vert";
-  const tonFc = !fc || !S.fc30 ? "" : fc.fc >= S.fc30 + 5 ? "rouge" : fc.fc > S.fc30 + 2 ? "jaune" : "vert";
-  const tonBb = !bb ? "" : bb.bb < 40 ? "rouge" : bb.bb < 70 ? "jaune" : "vert";
-  const tonSt = !st ? "" : st.stress > 50 ? "rouge" : st.stress > 25 ? "jaune" : "vert";
-  h += `<div class="tuiles">`
-    + tuile("VFC", v?.vfc, " ms", v ? (v.vfc_bas ? `habituel ${v.vfc_bas}–${v.vfc_haut}${v.j < jour ? ` · ${quand(v.j)}` : ""}` : quand(v.j)) : "", tonVfc)
-    + tuile("FC au repos", fc?.fc, " bpm", fc ? (S.fc30 ? `moyenne ${S.fc30} · ${quand(fc.j)}` : quand(fc.j)) : "", tonFc)
-    + tuile("Body Battery", bb?.bb, "", bb ? `max${bb.bb_min != null ? ` · min ${bb.bb_min}` : ""} · ${quand(bb.j)}` : "", tonBb)
-    + tuile("Stress", st?.stress, "", st ? `moyenne · ${quand(st.j)}` : "", tonSt)
-    + tuile("SpO2", sp ? Math.round(sp.spo2) : null, " %", sp ? `nuit · ${quand(sp.j)}` : "", sp ? (sp.spo2 < 92 ? "rouge" : "vert") : "")
-    + tuile("Respiration", rs ? Math.round(rs.resp) : null, " /min", rs ? `éveil · ${quand(rs.j)}` : "", "")
-    + `</div>`;
+    // La semaine en cours.
+    const auj = J.find((x) => x.j === jour);
+    const lundi = new Date(new Date(jour) - ((new Date(jour).getDay() + 6) % 7) * 864e5).toISOString().slice(0, 10);
+    const nSeances = Math.max(S.seances_semaine || 0, Object.keys(muscuParJour()).filter((d) => d >= lundi && d <= jour).length);
+    h += `<div class="carte"><b>Cette semaine</b>`
+      + jauge("Pas aujourd'hui", auj?.pas, C.pas, `${(auj?.pas || 0).toLocaleString("fr-FR")} / ${C.pas.toLocaleString("fr-FR")}`)
+      + jauge("Séances", nSeances, C.seances, `${nSeances} / ${C.seances}`)
+      + jauge("Minutes intensives", S.intensif_semaine, C.intensif, `${S.intensif_semaine ?? 0} / ${C.intensif}`)
+      + `</div>`;
 
-  // La semaine en cours.
-  const auj = J.find((x) => x.j === jour);
-  const lundi = new Date(new Date(jour) - ((new Date(jour).getDay() + 6) % 7) * 864e5).toISOString().slice(0, 10);
-  const nSeances = Math.max(S.seances_semaine || 0, Object.keys(muscuParJour()).filter((d) => d >= lundi && d <= jour).length);
-  h += `<div class="carte"><b>Cette semaine</b>`
-    + jauge("Pas aujourd'hui", auj?.pas, C.pas, `${(auj?.pas || 0).toLocaleString("fr-FR")} / ${C.pas.toLocaleString("fr-FR")}`)
-    + jauge("Séances", nSeances, C.seances, `${nSeances} / ${C.seances}`)
-    + jauge("Minutes intensives", S.intensif_semaine, C.intensif, `${S.intensif_semaine ?? 0} / ${C.intensif}`)
-    + `</div>`;
+    // Le sommeil sur la semaine : dette, régularité, heure conseillée.
+    const r = S.regularite;
+    h += `<div class="carte"><b>Sommeil</b><div class="lignes">
+      <div><span>Dette sur 7 nuits</span><b class="${S.dette > 240 ? "rouge" : S.dette > 120 ? "jaune" : ""}">${S.nuits ? hm(S.dette) : "–"}</b></div>
+      <div><span>Coucher moyen</span><b>${r ? `${r.heure} <small class="sous">± ${r.ecart} min</small>` : "–"}</b></div>
+      <div><span>Ce soir, au lit à</span><b class="bleu">${esc(S.coucher_conseil)}</b></div></div>
+      ${r ? `<div class="sous">${r.ecart <= 30 ? "Horaires réguliers" : "Horaires irréguliers : vise la même heure chaque soir"} (${r.nuits} nuits).</div>` : ""}</div>`;
 
-  // Le sommeil sur la semaine : dette, régularité, heure conseillée.
-  const r = S.regularite;
-  h += `<div class="carte"><b>Sommeil</b><div class="lignes">
-    <div><span>Dette sur 7 nuits</span><b class="${S.dette > 240 ? "rouge" : S.dette > 120 ? "jaune" : ""}">${S.nuits ? hm(S.dette) : "–"}</b></div>
-    <div><span>Coucher moyen</span><b>${r ? `${r.heure} <small class="sous">± ${r.ecart} min</small>` : "–"}</b></div>
-    <div><span>Ce soir, au lit à</span><b class="bleu">${esc(S.coucher_conseil)}</b></div></div>
-    ${r ? `<div class="sous">${r.ecart <= 30 ? "Horaires réguliers" : "Horaires irréguliers : vise la même heure chaque soir"} (${r.nuits} nuits).</div>` : ""}</div>`;
-
-  // Le ressenti noté dans le panneau, 14 derniers jours.
-  const res = Object.fromEntries((S.ressenti || []).map((x) => [x[0], x]));
-  const jours14 = Array.from({ length: 14 }, (_, k) => new Date(new Date(jour) - (13 - k) * 864e5).toISOString().slice(0, 10));
-  const coul = (x) => (x == null ? "" : `background:${["#ff453a", "#ff9f0a", "#ffd60a", "#a4e05a", "#30d158"][x - 1]}`);
-  h += `<div class="carte"><b>Ressenti</b> <span class="sous">14 jours, noté dans le panneau</span><div class="ressenti">`
-    + [["Énergie", 1], ["Humeur", 2], ["Peau", 3]].map(([nom, i]) => {
-      const vals = jours14.map((d) => res[d]?.[i] ?? null), notes = vals.filter((x) => x != null);
-      return `<span class="r-nom">${nom}</span><span class="points">${vals.map((x) => `<i style="${coul(x)}"></i>`).join("")}</span>
-        <span class="r-moy">${notes.length ? virgule(notes.reduce((a, b) => a + b, 0) / notes.length) : "–"}</span>`;
-    }).join("") + `</div></div>`;
+    // Le ressenti noté dans le panneau, 14 derniers jours.
+    const res = Object.fromEntries((S.ressenti || []).map((x) => [x[0], x]));
+    const jours14 = Array.from({ length: 14 }, (_, k) => new Date(new Date(jour) - (13 - k) * 864e5).toISOString().slice(0, 10));
+    const coul = (x) => (x == null ? "" : `background:${["#ff453a", "#ff9f0a", "#ffd60a", "#a4e05a", "#30d158"][x - 1]}`);
+    h += `<div class="carte"><b>Ressenti</b> <span class="sous">14 jours, noté dans le panneau</span><div class="ressenti">`
+      + [["Énergie", 1], ["Humeur", 2], ["Peau", 3]].map(([nom, i]) => {
+        const vals = jours14.map((d) => res[d]?.[i] ?? null), notes = vals.filter((x) => x != null);
+        return `<span class="r-nom">${nom}</span><span class="points">${vals.map((x) => `<i style="${coul(x)}"></i>`).join("")}</span>
+          <span class="r-moy">${notes.length ? virgule(notes.reduce((a, b) => a + b, 0) / notes.length) : "–"}</span>`;
+      }).join("") + `</div></div>`;
+    return h;
+  });
 
   // Les tendances, sur la période choisie.
-  const pt = (cle) => J.map((x) => [x.j, x[cle]]);
-  const o = { jours: periode, relier: periode > 30 ? 4 : 2 };
-  h += `<div class="periode">${[30, 90].map((p) => `<button data-periode="${p}" class="${p === periode ? "choisi" : ""}">${p} jours</button>`).join("")}</div>`;
-  const pes = pesees();
-  h += courbe("Poids", pes, { relier: 60, jours: 365, ajuster: true, fmt: (v) => virgule(v), legende: "kg" });
-  h += poidsSemaines(pes);
-  h += courbe("Sommeil", pt("sommeil"), { ...o, refs: [C.sommeil], fmt: hm, couleur: "#5e5ce6", legende: "pointillés : ta cible" });
-  h += courbe("VFC (nuit)", pt("vfc"), { ...o, bande: v?.vfc_bas ? [v.vfc_bas, v.vfc_haut] : null, couleur: "var(--vert)", legende: "ms, bande verte : ton habituel" });
-  h += courbe("FC au repos", pt("fc"), { ...o, couleur: "var(--rouge)", legende: "bpm" });
-  h += courbe("Body Battery", pt("bb"), { ...o, bas: 0, haut: 100, couleur: "#64d2ff", legende: "maximum du jour" });
-  h += courbe("Stress", pt("stress"), { ...o, bas: 0, couleur: "#ff9f0a", legende: "moyenne du jour" });
-  h += courbe("Pas", pt("pas"), { ...o, refs: [C.pas], bas: 0, fmt: (v) => (v >= 1000 ? `${virgule(v / 1000)}k` : String(Math.round(v))), couleur: "var(--bleu)" });
-  h += courbe("Heure de coucher", pt("coucher"), { ...o, fmt: (v) => { const t = Math.round(v) + 1080; return `${String(Math.floor(t / 60) % 24).padStart(2, "0")}:${String(t % 60).padStart(2, "0")}`; },
-    couleur: "var(--violet)", legende: "plus c'est plat, plus c'est régulier" });
+  h += section("courbes", "Courbes", () => {
+    let h = "";
+    const pt = (cle) => J.map((x) => [x.j, x[cle]]);
+    const o = { jours: periode, relier: periode > 30 ? 4 : 2 };
+    const v = dernier("vfc");
+    h += `<div class="periode">${[30, 90].map((p) => `<button data-periode="${p}" class="${p === periode ? "choisi" : ""}">${p} jours</button>`).join("")}</div>`;
+    const pes = pesees();
+    h += courbe("Poids", pes, { relier: 60, jours: 365, ajuster: true, fmt: (v) => virgule(v), legende: "kg" });
+    h += poidsSemaines(pes);
+    h += courbe("Sommeil", pt("sommeil"), { ...o, refs: [C.sommeil], fmt: hm, couleur: "#5e5ce6", legende: "pointillés : ta cible" });
+    h += courbe("VFC (nuit)", pt("vfc"), { ...o, bande: v?.vfc_bas ? [v.vfc_bas, v.vfc_haut] : null, couleur: "var(--vert)", legende: "ms, bande verte : ton habituel" });
+    h += courbe("FC au repos", pt("fc"), { ...o, couleur: "var(--rouge)", legende: "bpm" });
+    h += courbe("Body Battery", pt("bb"), { ...o, bas: 0, haut: 100, couleur: "#64d2ff", legende: "maximum du jour" });
+    h += courbe("Stress", pt("stress"), { ...o, bas: 0, couleur: "#ff9f0a", legende: "moyenne du jour" });
+    h += courbe("Pas", pt("pas"), { ...o, refs: [C.pas], bas: 0, fmt: (v) => (v >= 1000 ? `${virgule(v / 1000)}k` : String(Math.round(v))), couleur: "var(--bleu)" });
+    h += courbe("Heure de coucher", pt("coucher"), { ...o, fmt: (v) => { const t = Math.round(v) + 1080; return `${String(Math.floor(t / 60) % 24).padStart(2, "0")}:${String(t % 60).padStart(2, "0")}`; },
+      couleur: "var(--violet)", legende: "plus c'est plat, plus c'est régulier" });
+    return h;
+  });
 
-  if (S.objectifs?.length) {
+  if (S.objectifs?.length) h += section("objectifs", "Objectifs", () => {
     const obj = S.objectifs.map((x) => ({ ...x, ok: etatGeste("objectifs", x.texte, x.fait) }));
-    h += `<div class="carte"><b>Objectifs</b> <span class="sous">${obj.filter((x) => x.ok).length}/${obj.length}</span>`
+    return `<div class="carte"><b>Objectifs</b> <span class="sous">${obj.filter((x) => x.ok).length}/${obj.length}</span>`
       + obj.map((x) => `<button class="case ${x.ok ? "faite" : ""}" data-objectif="${esc(x.texte)}"><i>${x.ok ? "✓" : ""}</i>
         <span><b>${esc(x.texte)}</b>${x.ok && x.le ? `<span class="sous">atteint le ${esc(x.le)}</span>` : ""}</span></button>`).join("") + `</div>`;
-  }
+  });
   h += `<p class="sous">Montre synchronisée jusqu'au ${S.montre ? jj(S.montre) : "–"}${ctx.genere ? ` · PC vu le ${jj(ctx.genere)} à ${ctx.genere.slice(11, 16)}` : ""}.
     Repères tirés d'une montre de sport, pas un avis médical.</p>`;
   return h;
@@ -1451,6 +1502,8 @@ document.addEventListener("click", (ev) => {
     if (montre && window.Notification?.permission === "default") Notification.requestPermission();
     toast(montre ? "Montre : la notification de fin de repos portera « Série faite »" : "Montre : désactivée");
     prevenirSW();
+  } else if (t.dataset.replie) {
+    basculerReplie(t.dataset.replie);
   } else if (t.dataset.douleur != null) {
     const v = Number(t.dataset.douleur);
     s.douleur = s.douleur === v ? null : v; sauver();

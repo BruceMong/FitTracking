@@ -319,6 +319,11 @@ export async function chargerCarnet({ maintenant = "2026-11-09T17:00:00+01:00", 
       surDocument.hidden = !visible;
       for (const fn of ecouteursDoc.visibilitychange || []) fn({ type: "visibilitychange" });
     },
+    // Un toucher sur un bouton : les écouteurs « click » du document le reçoivent (dataset = ses data-*).
+    clic(dataset = {}, attributs = []) {
+      const bouton = { dataset, hasAttribute: (a) => attributs.includes(a), closest: (sel) => (sel === "button, [data-ligne]" ? bouton : null), matches: () => true };
+      for (const fn of ecouteursDoc.click || []) fn({ target: { closest: (sel) => bouton.closest(sel) } });
+    },
     lancerMinuteurs() {
       const enAttente = [...minuteurs.entries()];
       for (const [id] of enAttente) minuteurs.delete(id);

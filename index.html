@@ -120,6 +120,10 @@
   .echelle { display: grid; grid-template-columns: repeat(6, 1fr); gap: 6px; margin-top: 8px; }
   .echelle button { height: 48px; border: 0; border-radius: 8px; background: var(--carte2); color: var(--texte); font-size: 15px; padding: 0; }
   .echelle button.choisi { color: #000; font-weight: 700; }
+  /* Intertitre de section repliable (Santé) : une ligne à toucher, chevron à droite. */
+  .section-tete { display: flex; justify-content: space-between; align-items: center; width: 100%; min-height: 48px; margin-top: 8px;
+    padding: 0 4px; border: 0; background: none; color: var(--texte); font-size: 18px; font-weight: 700; text-align: left; }
+  .section-tete .chevron { font-style: normal; color: var(--doux); font-size: 16px; }
   .ligne2 { display: flex; gap: 8px; align-items: center; margin-top: 8px; }
   .ligne2 input { flex: 1; height: 44px; border-radius: 10px; border: 1px solid var(--ligne); background: var(--bg);
     color: var(--texte); font-size: 18px; padding: 0 10px; }
