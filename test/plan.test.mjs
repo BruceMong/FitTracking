@@ -46,7 +46,7 @@ test("plan en cours de séance : séries faites retirées, charges réglées sui
   const p = b.json("planMontre()");
   assert.equal(p.v, "2026-11-09T15:53:10.000Z");
   assert.deepEqual(p.etapes.slice(0, 2).map((e) => [e.id.split("|")[2], e.quoi, e.txt, e.c]),
-    [["2", "série 3/4", "45 kg × 6", 45], ["3", "série 4/4", "45 kg × 6", 45]]);
+    [["2", "série 3/4", "45 kg × 6", 45], ["3", "série 4/4", "45 kg × 5", 45]]);   // la charge suit, les reps restent celles du rang (6, 6, 6, 5)
   assert.equal(p.etapes.length, 8);
 });
 
@@ -164,4 +164,16 @@ test("planMontre : une série que noterSerie ne note pas arrête le plan au lieu
   const b = await chargerCarnet({ stockage: avecCtx() });
   b.evaluer("noterSerie = () => null");
   assert.deepEqual(b.json("planMontre().etapes"), []);
+});
+
+test("les séries prévues reprennent la cible série par série (« vise 8, 8, 6 » → 8, 8, 6)", async () => {
+  const ctx = { ...ctxPush, historique: { ...ctxPush.historique, [TRI]: { jour: "2026-11-05", series: [[20, 8], [20, 8], [20, 5]] } } };
+  const b = await chargerCarnet({ stockage: { "carnet:ctx": ctx } });
+  assert.equal(b.json(`lignesDe(${q(TRI)}).ci.texte`), "reste à 20 : vise 8, 8, 6");
+  assert.deepEqual(b.json(`lignesDe(${q(TRI)}).L.map((l) => [l.c, l.r])`), [[20, 8], [20, 8], [20, 6]]);
+  // 6, 6, 5, 5 : la plus faible gagne une répétition, dans l'ordre (6, 6, 6, 5 et non 6, 6, 5, 6)
+  assert.deepEqual(b.json(`lignesDe(${q(DC)}).L.map((l) => l.r)`), [6, 6, 6, 5]);
+  // régler la charge d'une ligne fait suivre la charge, pas les répétitions
+  b.evaluer(`lignesDe(${q(TRI)}).st.edits[0] = { c: 22.5 }`);
+  assert.deepEqual(b.json(`lignesDe(${q(TRI)}).L.map((l) => [l.c, l.r])`), [[22.5, 8], [22.5, 8], [22.5, 6]]);
 });

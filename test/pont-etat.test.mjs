@@ -36,7 +36,7 @@ test("plan_compact_du_carnet : forme exacte, et rebâti il redonne planMontre", 
   // même littéral que planCompactCarnet() du plan montre (test/Banc.mc) : la montre est testée sur ce message
   assert.deepEqual([m.j, m.x, m.e], ["2026-11-09", [[DC, 4, 2.5, 0, 0], [TRI, 3, 2.5, 1, 0], [ELE, 3, 2.5, 1, 0]],
     [[0, 0, 22.5, 10, 60, 1], [0, 0, 42.5, 6, 150, 0], [0, 1, 42.5, 6, 150, 0], [0, 2, 42.5, 6, 150, 0],
-     [0, 3, 42.5, 6, 120, 0], [1, 0, 20, 12, 0, 0], [2, 0, 8, 9, 120, 0], [1, 1, 20, 12, 0, 0], [2, 1, 8, 9, 120, 0],
+     [0, 3, 42.5, 5, 120, 0], [1, 0, 20, 12, 0, 0], [2, 0, 8, 9, 120, 0], [1, 1, 20, 12, 0, 0], [2, 1, 8, 9, 120, 0],
      [1, 2, 20, 12, 0, 0], [2, 2, 8, 9, 0, 0]]]);
   assert.deepEqual(deplier(m), b.json("planMontre().etapes"));
 });
