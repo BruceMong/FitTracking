@@ -310,6 +310,31 @@
   #flash { position: fixed; inset: 0; background: var(--vert); opacity: 0; pointer-events: none; z-index: 50; }
   #flash.on { animation: flash .45s ease-in-out 3; }
   @keyframes flash { 50% { opacity: .5; } }
+  /* Feuilles du bas (pastilles, menu ⋯) : collées en bas, pleine largeur ; le fond touché les ferme. */
+  dialog.feuille { margin: auto 0 0 0; width: 100%; max-width: none; max-height: 85vh; padding: 0; overflow-y: auto;
+    border-radius: 18px 18px 0 0; background: var(--carte); }
+  dialog.feuille::backdrop { background: rgba(0,0,0,.6); }
+  #feuille-corps { padding: 18px 16px calc(12px + env(safe-area-inset-bottom)); }
+  #feuille-corps::before { content: ""; display: block; width: 40px; height: 4px; border-radius: 2px; background: var(--repos);
+    margin: -10px auto 12px; }
+  .f-tete { display: flex; flex-direction: column; gap: 2px; padding-bottom: 8px; }
+  .f-tete b { font-size: 19px; } .f-tete span { color: var(--doux); font-size: 14px; }
+  .f-ligne { display: flex; align-items: center; justify-content: space-between; width: 100%; height: 52px; padding: 0 4px;
+    background: none; border: 0; border-top: 1px solid var(--ligne); color: var(--texte); font-size: 17px; text-align: left; }
+  .f-ligne.danger { color: var(--rouge); }
+  .f-case { width: 24px; height: 24px; border-radius: 7px; border: 2px solid var(--doux); display: grid; place-items: center;
+    font-size: 15px; font-weight: 700; color: #fff; }
+  .f-case.on { background: var(--bleu); border-color: var(--bleu); }
+  #feuille-corps .f-ls { display: block; padding: 0; background: none; border: 0; min-height: 0; }
+  .f-reglage { padding: 6px 0 10px; } .f-lib { display: block; color: var(--doux); font-size: 13px; margin-bottom: 6px; }
+  .f-pm { display: grid; grid-template-columns: 64px minmax(0, 1fr) 64px; gap: 10px; align-items: center; }
+  .f-pm button { height: 60px; border: 0; border-radius: 14px; background: var(--carte2); color: var(--texte); font-size: 30px; }
+  .f-val { text-align: center; } .f-val b { font-size: 30px; font-weight: 700; } .f-val small { color: var(--doux); margin-left: 4px; font-size: 14px; }
+  .f-reserve { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; }
+  .f-reserve button { height: 48px; border: 0; border-radius: 12px; background: var(--carte2); color: var(--texte); font-size: 18px; }
+  .f-reserve button.choisi { background: var(--bleu); font-weight: 700; }
+  .f-champ { display: flex; gap: 8px; padding-top: 6px; } .f-champ input { flex: 1; min-width: 0; }
+  .f-ok { height: 44px; padding: 0 18px; border: 0; border-radius: 10px; background: var(--bleu); color: #fff; font-size: 16px; font-weight: 600; }
   #toast { position: fixed; left: 12px; right: 12px; bottom: calc(206px + env(safe-area-inset-bottom)); background: var(--texte); color: #000;
     border-radius: 12px; padding: 10px 14px; display: none; align-items: center; justify-content: space-between; gap: 10px; z-index: 40; font-size: 15px; }
   #toast.vu { display: flex; }
@@ -553,6 +578,7 @@
   <button class="lien" id="fermer-ajout">Annuler</button>
 </dialog>
 <div id="grand"><i id="g-niveau"></i><div id="g-corps"></div></div>
+<dialog id="feuille" class="feuille"><div id="feuille-corps"></div></dialog>
 <div id="flash"></div>
 <div id="toast" role="status"></div>
 <dialog id="fiche">

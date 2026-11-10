@@ -106,6 +106,7 @@ let ouvert = null;                            // exercice dont la saisie est dé
 let saisie = lire(`carnet:saisie:${jour}`, {});  // nom → {edits: {ligne: {c, r}}, extra} : lignes prévues réglées à la main
 let memoEdite = null;                         // exercice dont le mémo est en cours de modification
 let choisie = null;                           // [nom, ligne] sélectionnée (sinon : la prochaine série)
+let feuilleOuverte = null, feuilleHtml = "";  // la feuille du bas ouverte : { quoi: "serie" | "menu" | "memo" | "note", nom, k, ech }
 let onglet = "seance";                        // « seance », « sante » ou « progres »
 let exoGraphe = lire("carnet:exo-graphe");    // exercice tracé dans Progrès
 
@@ -511,7 +512,7 @@ function dessiner() {
   }
   grandVu = vueExercice();
   if (grandVu) { ecranAllume(); if (!history.state?.exercice) history.pushState({ exercice: 1 }, ""); }
-  dessinerPage(); majGrand(true); majRepos();
+  dessinerPage(); majGrand(true); majRepos(); majFeuille();
   envoyerPlanPont();
 }
 
@@ -1448,6 +1449,7 @@ document.addEventListener("click", (ev) => {
   const carte = t.closest("[data-exo]");
   const nom = carte?.dataset.exo;
   const s = seanceDuJour();
+  if (t.closest("#feuille") && (!t.matches("button") || clicFeuille(t, nom))) return;   // sinon le geste est celui des cartes
   if (t.dataset.fiche) {
     ouvrirFiche(t.dataset.fiche); return;
   } else if (t.dataset.soin) {
@@ -2782,13 +2784,127 @@ function clicGrand(ev) {
   const g = ev.target.closest("[data-g]")?.dataset.g;
   if (g === "liste") return quitterExercice();
   if (g === "une-de-plus") { uneSerieDePlus(exoAffiche()); return dessiner(); }   // un exercice fini repart
-  if (g === "menu") return;   // ⋯ : pas encore d'actions, sa feuille vient ensuite
+  if (g === "menu") { const nom = exoAffiche(); if (nom) ouvrirFeuille(menuExo(nom), { quoi: "menu", nom }); return; }
+  const pastille = ev.target.closest("[data-pastille]");
+  if (pastille?.dataset.pastille != null) {
+    const nom = exoAffiche(), k = Number(pastille.dataset.pastille), ech = !!pastille.dataset.ech;
+    if (nom) ouvrirFeuille(feuilleSerie(nom, k, ech), { quoi: "serie", nom, k, ech });
+    return;
+  }
   if (g === "go") { passerRepos(); return dessiner(); }
   if (g === "plus") { uneSerieDePlus(minu?.nom); return dessiner(); }   // on reste sur l'exercice, le repos continue
   if (g === "prec" || g === "suiv") { changerExo(g === "suiv" ? 1 : -1, exoAffiche()); return dessiner(); }
   clicMinuteur(ev);
 }
 $("#grand").addEventListener("click", clicGrand);
+
+// ───────────────────────────────────────── Feuilles du bas
+// Une pastille de la vue Exercice ouvre sa série pour la corriger (feuille « série »), « ⋯ » les actions de
+// l'exercice (feuille « menu »). C'est un <dialog> modal : au-dessus de la barre d'onglets et de la vue Exercice,
+// le fond touché la ferme. Les boutons gardent les attributs des cartes (data-pm, data-plus-serie…) : le gestionnaire
+// de clics global les traite, la racine data-exo lui donne l'exercice.
+const nomDeSerie = (k, ech) => (ech ? `Échauffement ${k + 1}` : `Série ${k + 1}`);
+
+function feuilleSerie(nom, k, ech) {
+  const { L, W, mode, pas } = lignesDe(nom), l = (ech ? W : L).find((x) => x.k === k);
+  if (!l) return "";
+  const pm = (champ, lib, val, unite, pasTxt) => `<div class="f-reglage"><span class="f-lib">${lib}</span><div class="f-pm">
+    <button data-pm="${champ}" data-d="-1" aria-label="moins ${pasTxt}">−</button><span class="f-val"><b>${val}</b><small>${unite}</small></span>
+    <button data-pm="${champ}" data-d="1" aria-label="plus ${pasTxt}">+</button></div></div>`;
+  const reglages = (mode === "charge" ? pm("c", "Charge", kg(l.c), "kg", `${kg(pas)} kg`) : "")
+    + pm("r", mode === "duree" ? "Durée" : "Répétitions", l.r, mode === "duree" ? "s" : "rép.", mode === "duree" ? "5 secondes" : "une répétition");
+  // La réserve et le retrait n'ont de sens que pour une série déjà faite (l'échauffement n'a pas de réserve).
+  const reserve = l.fait && !ech && mode === "charge"
+    ? `<div class="f-reglage"><span class="f-lib">Réserve</span><div class="f-reserve">${[0, 1, 2, 3, 4].map((i) =>
+      `<button data-f-reserve="${i}" class="${l.e === i ? "choisi" : ""}">${i === 4 ? "4+" : i}</button>`).join("")}</div></div>` : "";
+  const retirer = l.fait ? `<button class="f-ligne danger" data-f-retirer>${ech ? "Retirer l'échauffement" : "Retirer la série"}</button>` : "";
+  return `<div data-exo="${esc(nom)}"><div class="f-tete"><b>${nomDeSerie(k, ech)}</b><span>${esc(nom)} · ${l.fait ? "faite" : "prévue"}</span></div>
+    <div class="ls f-ls" data-ligne="${k}" data-nom="${esc(nom)}" ${ech ? 'data-ech="1"' : ""}>${reglages}</div>${reserve}${retirer}</div>`;
+}
+
+function menuExo(nom) {
+  const e = seanceDuJour().exos.find((x) => x.nom === nom), part = partenaireSuperset(nom), { mode } = lignesDe(nom);
+  const ligne = (attr, texte, plus = "") => `<button class="f-ligne" ${attr}>${texte}${plus}</button>`;
+  const caseA = (on) => `<span class="f-case ${on ? "on" : ""}" aria-hidden="true">${on ? "✓" : ""}</span>`;
+  return `<div data-exo="${esc(nom)}"><div class="f-tete"><b>${esc(nom)}</b><span>actions de l'exercice</span></div>
+    ${FICHES[nom] ? ligne(`data-fiche="${esc(nom)}"`, "Fiche de l'exercice") : ""}
+    ${ligne(`data-memo="${esc(nom)}"`, "Mémo de réglage")}
+    ${ligne("data-f-note", "Note sur l'exercice")}
+    ${ligne("data-plus-serie", "+ une série")}
+    ${mode === "charge" ? ligne("data-plus-ech", "+ échauffement") : ""}
+    ${ligne("data-remplacer", "Remplacer l'exercice")}
+    ${part ? ligne(`data-superset="${esc(nom)}"`, `Superset avec ${esc(part)}`, caseA(ssActif(nom))) : ""}
+    ${ligne("data-hp", "Hors progression", caseA(!!e?.hp))}</div>`;
+}
+
+// Mémo et note : un champ dans la feuille, « OK » enregistre et revient au menu.
+function feuilleChamp(quoi, nom) {
+  const memoQ = quoi === "memo", e = seanceDuJour().exos.find((x) => x.nom === nom);
+  return `<div data-exo="${esc(nom)}"><div class="f-tete"><b>${memoQ ? "Mémo de réglage" : "Note sur l'exercice"}</b><span>${esc(nom)}</span></div>
+    <div class="f-champ"><input id="${memoQ ? "memo-champ" : "note-champ"}" value="${esc(memoQ ? memo(nom) : e?.note || "")}"
+      placeholder="${memoQ ? "cran 15 · siège 3 · prise large…" : "une remarque pour aujourd'hui"}" enterkeyhint="done">
+      <button class="f-ok" ${memoQ ? "data-memo-ok" : "data-note-ok"}>OK</button></div></div>`;
+}
+
+const htmlFeuille = (f) => f.quoi === "serie" ? feuilleSerie(f.nom, f.k, f.ech) : f.quoi === "menu" ? menuExo(f.nom) : feuilleChamp(f.quoi, f.nom);
+
+function ouvrirFeuille(html, sujet = feuilleOuverte) {
+  feuilleOuverte = sujet;
+  $("#feuille-corps").innerHTML = feuilleHtml = html;
+  const dlg = $("#feuille");
+  if (!dlg.open) dlg.showModal();
+}
+function fermerFeuille() {
+  feuilleOuverte = null; feuilleHtml = "";
+  const dlg = $("#feuille");
+  if (dlg.open) dlg.close();
+}
+// Après chaque geste : la feuille ouverte se redessine sur son sujet (une valeur changée, une case cochée) ; si son
+// sujet a disparu (série retirée, exercice remplacé), elle se ferme. Un champ en cours de saisie n'est pas réécrit.
+function majFeuille() {
+  if (!feuilleOuverte) return;
+  const html = htmlFeuille(feuilleOuverte);
+  if (!html) return fermerFeuille();
+  if (html !== feuilleHtml) $("#feuille-corps").innerHTML = feuilleHtml = html;
+}
+$("#feuille").addEventListener("click", (ev) => { if (ev.target.id === "feuille") fermerFeuille(); });
+$("#feuille").addEventListener("close", () => { feuilleOuverte = null; feuilleHtml = ""; });   // Échap, retour
+
+// Les gestes propres aux feuilles. Rend true quand le geste est fini (la feuille est redessinée), false pour laisser
+// le gestionnaire des cartes le traiter (− / +, + une série, hors progression…).
+function clicFeuille(t, nom) {
+  const f = feuilleOuverte, s = seanceDuJour();
+  if (t.hasAttribute("data-f-reserve")) {
+    const x = s.exos.find((z) => z.nom === nom)?.series?.[f?.k], i = Number(t.dataset.fReserve);
+    if (x && x.e === i) { delete x.e; sauver(); } else noterReserve(nom, f?.k, i);   // retoucher la même réserve l'efface
+  } else if (t.hasAttribute("data-f-retirer")) {
+    if (f?.ech) {
+      const e = s.exos.find((x) => x.nom === nom);
+      if (e?.ech?.[f.k]) { e.ech.splice(f.k, 1); lignesDe(nom).st.echEdits = {}; if (!e.ech.length) delete e.ech; sauver(); }
+    } else retirerSerie(nom, f?.k);
+    fermerFeuille();
+  } else if (t.hasAttribute("data-memo")) {
+    feuilleOuverte = { quoi: "memo", nom }; majFeuille();
+    setTimeout(() => $("#memo-champ")?.focus(), 0); return true;
+  } else if (t.hasAttribute("data-f-note")) {
+    feuilleOuverte = { quoi: "note", nom }; majFeuille();
+    setTimeout(() => $("#note-champ")?.focus(), 0); return true;
+  } else if (t.hasAttribute("data-memo-ok")) {
+    const v = $("#memo-champ").value.trim().replace(/\|/g, "/");
+    ecrire(`carnet:memo:${nom}`, v);
+    s.memos = { ...(s.memos || {}), [nom]: v };   // part au PC avec la séance du jour
+    feuilleOuverte = { quoi: "menu", nom }; sauver();
+  } else if (t.hasAttribute("data-note-ok")) {
+    const v = $("#note-champ").value.trim();
+    let e = s.exos.find((x) => x.nom === nom);
+    if (!e && v) { e = { nom, series: [] }; s.exos.push(e); }
+    if (e) { if (v) e.note = v; else delete e.note; }
+    feuilleOuverte = { quoi: "menu", nom }; sauver();
+  } else if (t.hasAttribute("data-plus-serie") || t.hasAttribute("data-plus-ech") || t.hasAttribute("data-remplacer") || t.dataset.fiche) {
+    fermerFeuille(); return false;   // l'action a lieu sur l'écran (ou dans son propre dialogue)
+  } else return false;
+  dessiner(); return true;
+}
 // Glisser horizontalement sur le haut de la vue (au moins 60 px, comme une série) : l'exercice suivant (vers la
 // gauche) ou précédent, comme ‹ ›, et seulement quand ils sont là.
 let glisseTete = null;
