@@ -1552,7 +1552,7 @@ document.addEventListener("click", (ev) => {
     if (!nm) return;
     allerExercice(nm); choisie = null;
   } else if (t.hasAttribute("data-plus-serie")) {
-    lignesDe(nom).st.extra++;
+    if (!plusDeFini(nom)) lignesDe(nom).st.extra++;
   } else if (t.id === "ajouter") {
     ouvrirAjout(); return;
   } else return;
@@ -1562,11 +1562,15 @@ document.addEventListener("click", (ev) => {
 document.addEventListener("change", (ev) => {
   if (ev.target.id === "choix-exo") { exoGraphe = ev.target.value; ecrire("carnet:exo-graphe", exoGraphe); dessiner(); }
   if (ev.target.dataset.champ) {
+    // La charge ou les répétitions tapées (vue Exercice, feuille d'une série), validées par « OK » du clavier ou en
+    // quittant le champ. Le champ est quitté (le clavier se ferme) ; le redessin attend la fin du geste en cours :
+    // le − / + ou « Série faite » touché pour quitter le champ reçoit son clic avant que l'écran soit réécrit.
     const row = ev.target.closest(".ls"), nom = row.dataset.nom, champ = ev.target.dataset.champ;
     const brut = ev.target.value.trim().replace(",", ".").toLowerCase();
     const v = champ === "c" && (brut === "" || brut === "pdc") ? 0 : parseFloat(brut);
     if (Number.isFinite(v)) regler(nom, Number(row.dataset.ligne), !!row.dataset.ech, champ, v);
-    dessiner();
+    ev.target.blur();
+    setTimeout(dessiner, 0);
   }
 });
 
@@ -1765,8 +1769,9 @@ $("#fermer-ajout").addEventListener("click", () => $("#ajout").close());
 // répétitions), pour la série identique qu'on vient de refaire.
 let glisse = null, annulation = null;
 document.addEventListener("touchstart", (ev) => {
-  // Dans les cartes seulement : la vue Exercice porte elle-même la classe « serie » (son état).
-  const el = ev.target.closest("#app .serie");
+  // Dans les cartes seulement : la vue Exercice porte elle-même la classe « serie » (son état). Les puces
+  // d'échauffement (data-ligne="0", sans rang de série) ne se glissent pas.
+  const el = ev.target.closest("#app .serie:not(.ech)");
   glisse = el ? { el, x: ev.touches[0].clientX, y: ev.touches[0].clientY } : null;
 }, { passive: true });
 document.addEventListener("touchmove", (ev) => {
@@ -2467,7 +2472,7 @@ function reprendreRepos(t = Date.now()) {
 // « Go » / « Passer » / « Sans repos » de la vue Exercice : le repos s'arrête, l'exercice proposé s'ouvre.
 function passerRepos() {
   if (minu?.mode !== "repos" && minu?.mode !== "fin") return false;
-  ouvert = exoGrand(); choisie = null; arreterRepos();
+  ouvert = exoGrand(); choisie = null; exoChoisi = null; arreterRepos();
   return true;
 }
 // Les flèches de la vue Exercice : l'exercice suivant (1) ou précédent (-1) de ceux qui ont encore des séries,
@@ -2490,6 +2495,14 @@ function changerExo(sens, depuis = exoGrand()) {
 function uneSerieDePlus(nom) {
   if (!nom || !exosAffiches(seanceDuJour()).includes(nom)) return false;
   lignesDe(nom).st.extra++;
+  return true;
+}
+// « + une série » sur un exercice fini montré pour être corrigé (vue Exercice, ou son menu ⋯) : hors repos, il repart
+// et devient l'exercice à faire.
+function plusDeFini(nom) {
+  const fini = !!nom && !resteSeries(nom);
+  if (!uneSerieDePlus(nom)) return false;
+  if (fini && !minu) ouvert = nom;
   return true;
 }
 // La réserve (0 à 4+) de la série i de l'exercice.
@@ -2560,7 +2573,7 @@ function clicMinuteur(ev) {
     return fait || garder();
   }
   const b = ev.target.closest("[data-min]");
-  if (!b && minu && $("#minuteur").classList.contains("compact")) { allerExercice(minu.nom); dessiner(); return; }
+  if (!b && minu && $("#minuteur").classList.contains("compact")) { allerAuRepos(); dessiner(); return; }
   if (!b || !minu) return;
   const a = b.dataset.min;
   if (a === "stop") return arreterRepos();
@@ -2604,8 +2617,18 @@ function exoAffiche() {
   if (exoChoisi && !minu && exosAffiches(seanceDuJour()).includes(exoChoisi) && !resteSeries(exoChoisi)) return exoChoisi;
   return exoGrand();
 }
+// Un exercice touché (carte de la Liste, ajout) : il devient l'exercice à faire seulement s'il lui reste des séries ;
+// fini, il est montré pour être corrigé sans déplacer l'exercice à faire (ni le plan de la montre). Pendant un repos
+// (ou un enchaînement), l'écran du repos s'impose et rien n'est retenu : le choix ressortirait après « Go ».
 function allerExercice(nom) {
-  ouvert = nom; exoChoisi = nom; vue = "exercice"; ecrire("carnet:vue", { vue, jour });
+  exoChoisi = minu ? null : nom;
+  if (!minu && resteSeries(nom)) ouvert = nom;
+  vue = "exercice"; ecrire("carnet:vue", { vue, jour });
+}
+// La ligne de repos des autres onglets (et de la Liste) : l'écran du repos, dans l'onglet Séance.
+function allerAuRepos() {
+  if (onglet !== "seance") { onglet = "seance"; window.scrollTo(0, 0); }
+  allerExercice(minu.nom);
 }
 function allerListe() { vue = "liste"; exoChoisi = null; ecrire("carnet:vue", { vue, jour }); }
 // ☰ et « Voir la séance » : l'entrée d'historique de la vue Exercice est retirée (history.back), et c'est son popstate
@@ -2646,14 +2669,22 @@ function aFaire(nom) {
 }
 const cibleTxt = (nom) => { const { l, mode } = aFaire(nom); return !l ? "" : mode === "charge" ? `${kg(l.c)} kg × ${l.r}` : serieTxt(nom, l.c, l.r); };
 
+// La valeur d'un réglage, à taper au clavier entre ses − / + : data-champ la branche sur l'écouteur « change » (la
+// ligne .ls donne l'exercice et la série). Charge vide = poids du corps.
+const champValeur = (champ, l, mode) => champ === "c"
+  ? `<input data-champ="c" inputmode="decimal" enterkeyhint="done" value="${l.c ? kg(l.c) : ""}" placeholder="pdc" aria-label="charge en kg">`
+  : `<input data-champ="r" inputmode="numeric" enterkeyhint="done" value="${l.r}" aria-label="${mode === "duree" ? "secondes" : "répétitions"}">`;
+// Un champ data-champ dans el a le doigt (clavier ouvert) : el n'est pas réécrit, la saisie serait perdue.
+const saisieDans = (el) => { const a = document.activeElement; return !!a?.dataset?.champ && !!el.contains(a); };
+
 // Les − / + de la prochaine série : .ls et data-ligne les branchent sur les mêmes gestes que la carte.
 function reglageGrand(nom) {
   const { l, ech, mode, pas } = aFaire(nom);
   if (!l) return "";
-  const pm = (champ, val, unite, pasTxt) => `<div class="g-pm"><button data-pm="${champ}" data-d="-1" aria-label="moins ${pasTxt}">−</button>
-    <span class="g-val"><b>${val}</b><small>${unite}</small></span><button data-pm="${champ}" data-d="1" aria-label="plus ${pasTxt}">+</button></div>`;
+  const pm = (champ, unite, pasTxt) => `<div class="g-pm"><button data-pm="${champ}" data-d="-1" aria-label="moins ${pasTxt}">−</button>
+    <span class="g-val">${champValeur(champ, l, mode)}<small>${unite}</small></span><button data-pm="${champ}" data-d="1" aria-label="plus ${pasTxt}">+</button></div>`;
   return `<div class="ls g-ligne" data-ligne="${l.k}" data-nom="${esc(nom)}" ${ech ? 'data-ech="1"' : ""}>
-    ${mode === "charge" ? pm("c", kg(l.c), "kg", `${kg(pas)} kg`) : ""}${pm("r", l.r, mode === "duree" ? "s" : "rép.", mode === "duree" ? "5 secondes" : "une répétition")}</div>`;
+    ${mode === "charge" ? pm("c", "kg", `${kg(pas)} kg`) : ""}${pm("r", mode === "duree" ? "s" : "rép.", mode === "duree" ? "5 secondes" : "une répétition")}</div>`;
 }
 
 // Les pastilles des séries de l'exercice, échauffements d'abord : faite (fond vert, « 52×6 », « @2 » si la réserve
@@ -2670,9 +2701,8 @@ function pastillesGrand(nom, compact = false) {
 
 function corpsGrand(etat) {
   const nom = exoAffiche(), s = seanceDuJour();
-  // ☰ : la Liste des exercices ; ⋯ (vue série seulement) : les actions de l'exercice.
-  const outils = (menu) => `<div class="g-outils"><button data-g="liste" aria-label="Liste des exercices">☰</button>${
-    menu ? `<button data-g="menu" aria-label="Actions de l'exercice">⋯</button>` : ""}</div>`;
+  // ☰ : la Liste des exercices ; ⋯ : les actions de l'exercice (au repos, de celui annoncé ensuite).
+  const outils = `<div class="g-outils"><button data-g="liste" aria-label="Liste des exercices">☰</button><button data-g="menu" aria-label="Actions de l'exercice">⋯</button></div>`;
   const ef = minu?.effort, x = ef ? s.exos.find((e) => e.nom === ef.nom)?.series?.[ef.i] : null;
   const zone = (avecReglage) => {
     const qr = x ? questionReserve(x, ef) : null;
@@ -2701,7 +2731,7 @@ function corpsGrand(etat) {
       mm ? `<div class="g-memo">📌 ${esc(mm)}</div>` : "",
     ].join("");
     return `<div class="g-tete">${fl("prec", "‹")}<div class="g-titre"><b>${esc(nom)}</b>
-        <span>${ss ? "⚡ superset, sans repos · " : ""}exercice ${tous.indexOf(nom) + 1} sur ${tous.length}${groupe ? ` · ${esc(groupe)}` : ""}${fini ? " · terminé ✓" : ""}</span></div>${fl("suiv", "›")}${outils(true)}</div>
+        <span>${ss ? "⚡ superset, sans repos · " : ""}exercice ${tous.indexOf(nom) + 1} sur ${tous.length}${groupe ? ` · ${esc(groupe)}` : ""}${fini ? " · terminé ✓" : ""}</span></div>${fl("suiv", "›")}${outils}</div>
       <div class="g-infos">${infos}</div>
       ${pastillesGrand(nom)}
       ${fini ? `<div class="g-milieu"></div>
@@ -2712,14 +2742,14 @@ function corpsGrand(etat) {
         <button class="g-principal" ${ech ? "data-cocher-ech" : "data-cocher"}>${ech ? "Échauffement fait" : `Série ${k0 + 1} faite`}</button></div>`}`;
   }
   if (etat === "fin" && !nom) {
-    return `<div class="g-tete"><div class="g-titre"><b>${esc(minu.nom)}</b><span>dernier exercice de la séance</span></div>${outils(false)}</div>
+    return `<div class="g-tete"><div class="g-titre"><b>${esc(minu.nom)}</b><span>dernier exercice de la séance</span></div>${outils}</div>
       ${pastillesGrand(minu.nom, true)}
       <div class="g-milieu"><div class="g-bravo">✓</div></div>
       ${zone(false)}
       <div class="g-actions"><button class="g-principal" data-g="go">Terminer</button></div>`;
   }
   if (etat === "fin") {
-    return `<div class="g-tete"><div class="g-titre"><b>${esc(minu.nom)}</b><span>exercice terminé</span></div>${outils(false)}</div>
+    return `<div class="g-tete"><div class="g-titre"><b>${esc(minu.nom)}</b><span>exercice terminé</span></div>${outils}</div>
       ${pastillesGrand(minu.nom, true)}
       <div class="g-milieu"><div class="g-bravo">✓</div><div class="g-ensuite">Ensuite : <b>${esc(nom)}</b></div></div>
       ${zone(false)}
@@ -2733,7 +2763,7 @@ function corpsGrand(etat) {
     : `Ensuite : ${memeExo ? "" : `${esc(nom)} · `}<b>${esc(cibleTxt(nom))}</b>`;
   const etatRepos = etat === "fini" ? "repos terminé" : minu.restant != null ? "repos en pause" : "repos";
   const sous = change ? [`exercice suivant · ${cibleTxt(nom)}`, memo(nom)].filter(Boolean).join(" · ") : etatRepos;
-  const tete = `<div class="g-tete"><div class="g-titre"><b>${esc(change ? nom : minu.nom)}</b><span>${esc(sous)}</span></div>${outils(false)}</div>
+  const tete = `<div class="g-tete"><div class="g-titre"><b>${esc(change ? nom : minu.nom)}</b><span>${esc(sous)}</span></div>${outils}</div>
     ${pastillesGrand(minu.nom, true)}
     <div class="g-milieu"><div class="g-chrono" id="g-chrono"></div><div class="g-ensuite">${ensuite}</div>
       ${change ? `<button class="g-lien" data-g="plus">+ une série de ${esc(minu.nom)}</button>` : ""}</div>`;
@@ -2753,9 +2783,12 @@ function majGrand(complet = false) {
   const pause = minu?.restant != null;
   const signe = `${etat} ${pause ? "pause" : ""}`;
   if (complet || signe !== grandEtat) {
+    const autreEtat = signe !== grandEtat;
     grandEtat = signe;
     const html = corpsGrand(etat), c = $("#g-corps"), nom = exoAffiche();
-    if (c.dataset.html !== html) {
+    // Une valeur en cours de saisie n'est pas effacée par un redessin venu d'ailleurs (la montre, la base) ; un
+    // changement d'état (série notée, repos fini) réécrit quand même.
+    if (c.dataset.html !== html && (autreEtat || !saisieDans(c))) {
       c.innerHTML = html; c.dataset.html = html;
       // Pastilles sur une ligne qui défile (fenêtre basse) : la prochaine série (ou la dernière faite) à l'écran.
       const p = c.querySelector(".g-pastilles"), x = p && (p.querySelector(".prochaine") || [...p.querySelectorAll(".fait")].at(-1));
@@ -2772,8 +2805,9 @@ function majGrand(complet = false) {
 function clicGrand(ev) {
   const g = ev.target.closest("[data-g]")?.dataset.g;
   if (g === "liste") return quitterExercice();
-  if (g === "une-de-plus") { uneSerieDePlus(exoAffiche()); return dessiner(); }   // un exercice fini repart
-  if (g === "menu") { const nom = exoAffiche(); if (nom) ouvrirFeuille(menuExo(nom), { quoi: "menu", nom }); return; }
+  if (g === "une-de-plus") { plusDeFini(exoAffiche()); return dessiner(); }
+  // ⋯ : l'exercice affiché ; au repos, celui annoncé ensuite (exoAffiche), sinon celui qui vient de finir.
+  if (g === "menu") { const nom = exoAffiche() || minu?.nom; if (nom) ouvrirFeuille(menuExo(nom), { quoi: "menu", nom }); return; }
   const pastille = ev.target.closest("[data-pastille]");
   if (pastille?.dataset.pastille != null) {
     const nom = pastille.dataset.pn || exoAffiche(), k = Number(pastille.dataset.pastille), ech = !!pastille.dataset.ech;
@@ -2797,11 +2831,11 @@ const nomDeSerie = (k, ech) => (ech ? `Échauffement ${k + 1}` : `Série ${k + 1
 function feuilleSerie(nom, k, ech) {
   const { L, W, mode, pas } = lignesDe(nom), l = (ech ? W : L).find((x) => x.k === k);
   if (!l) return "";
-  const pm = (champ, lib, val, unite, pasTxt) => `<div class="f-reglage"><span class="f-lib">${lib}</span><div class="f-pm">
-    <button data-pm="${champ}" data-d="-1" aria-label="moins ${pasTxt}">−</button><span class="f-val"><b>${val}</b><small>${unite}</small></span>
+  const pm = (champ, lib, unite, pasTxt) => `<div class="f-reglage"><span class="f-lib">${lib}</span><div class="f-pm">
+    <button data-pm="${champ}" data-d="-1" aria-label="moins ${pasTxt}">−</button><span class="f-val">${champValeur(champ, l, mode)}<small>${unite}</small></span>
     <button data-pm="${champ}" data-d="1" aria-label="plus ${pasTxt}">+</button></div></div>`;
-  const reglages = (mode === "charge" ? pm("c", "Charge", kg(l.c), "kg", `${kg(pas)} kg`) : "")
-    + pm("r", mode === "duree" ? "Durée" : "Répétitions", l.r, mode === "duree" ? "s" : "rép.", mode === "duree" ? "5 secondes" : "une répétition");
+  const reglages = (mode === "charge" ? pm("c", "Charge", "kg", `${kg(pas)} kg`) : "")
+    + pm("r", mode === "duree" ? "Durée" : "Répétitions", mode === "duree" ? "s" : "rép.", mode === "duree" ? "5 secondes" : "une répétition");
   // La réserve et le retrait n'ont de sens que pour une série déjà faite (l'échauffement n'a pas de réserve).
   const reserve = l.fait && !ech && mode === "charge"
     ? `<div class="f-reglage"><span class="f-lib">Réserve</span><div class="f-reserve">${[0, 1, 2, 3, 4].map((i) =>
@@ -2824,7 +2858,7 @@ function menuExo(nom) {
     ${ligne("data-remplacer", "Remplacer l'exercice")}
     ${part ? ligne(`data-superset="${esc(nom)}"`, `Superset avec ${esc(part)}`, caseA(ssActif(nom))) : ""}
     ${mode !== "charge" ? ligne(`data-mesure="${mode === "duree" ? "reps" : "duree"}"`, mode === "duree" ? "Compter en répétitions" : "Compter en secondes") : ""}
-    ${ligne("data-hp", "Hors progression", caseA(!!e?.hp))}</div>`;
+    ${seanceDuJour().hp ? "" : ligne("data-hp", "Hors progression", caseA(!!e?.hp))}</div>`;
 }
 
 // Mémo et note : un champ dans la feuille, « OK » enregistre et revient au menu.
@@ -2855,7 +2889,7 @@ function majFeuille() {
   if (!feuilleOuverte) return;
   const html = htmlFeuille(feuilleOuverte);
   if (!html) return fermerFeuille();
-  if (html !== feuilleHtml) $("#feuille-corps").innerHTML = feuilleHtml = html;
+  if (html !== feuilleHtml && !saisieDans($("#feuille-corps"))) $("#feuille-corps").innerHTML = feuilleHtml = html;
 }
 $("#feuille").addEventListener("click", (ev) => { if (ev.target.id === "feuille") fermerFeuille(); });
 $("#feuille").addEventListener("close", () => { feuilleOuverte = null; feuilleHtml = ""; });   // Échap, retour

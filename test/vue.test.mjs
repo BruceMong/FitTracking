@@ -3,7 +3,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { chargerCarnet } from "./banc.mjs";
-import { DC, TRI, ELE, JOUR, ctxPush, avecCtx, enCours } from "./fixtures.mjs";
+import { DC, TRI, ELE, JOUR, ctxPush, avecCtx, avecCtxSansSs, enCours } from "./fixtures.mjs";
 
 const q = JSON.stringify;
 // La vue Exercice ne s'affiche qu'avec une clé posée (sans elle, la page d'accueil demande la clé).
@@ -173,4 +173,88 @@ test("vue Liste choisie aujourd'hui : gardée au rechargement", async () => {
   const b = await chargerCarnet({ stockage: avecCle({ "carnet:vue": { vue: "liste", jour: JOUR } }) });
   b.evaluer("dessiner()");
   assert.equal(b.json("vue"), "liste");
+});
+
+// Séance du jour sans la paire de superset, avec des séries déjà notées (S : une série faite à 16:00).
+const S = (c, r) => ({ c, r, t: "16:00:00" });
+const sansSs = (exos) => avecCtxSansSs({ "carnet:cle": "cle-essai",
+  [`carnet:seance:${JOUR}`]: { doc: { jour: JOUR, type: "push", exos, note: "", maj: "2026-11-09T15:00:00Z" }, sale: false } });
+const fois = (n, c, r) => Array.from({ length: n }, () => S(c, r));
+
+test("pendant un repos, une carte touchée dans la Liste ramène à l'écran du repos, sans garder le choix", async () => {
+  const b = await chargerCarnet({ stockage: sansSs([{ nom: ELE, series: fois(3, 8, 12) }]) });
+  b.evaluer(`dessiner(); validerSerie(${q(DC)}); allerListe(); dessiner(); allerExercice(${q(ELE)}); dessiner()`);
+  assert.equal(b.json("grandVu"), true);
+  assert.equal(b.json("etatGrand()"), "repos");
+  assert.equal(b.json("exoChoisi"), null);
+  // « Go » : la série suivante du développé, pas l'exercice fini touché pendant le repos
+  clicG(b, "go");
+  assert.equal(b.json("exoAffiche()"), DC);
+  const html = b.json(`corpsGrand("serie")`);
+  assert.match(html, /Série 2 faite/);
+  assert.doesNotMatch(html, /data-g="une-de-plus"/);
+  assert.equal(b.json(`lignesDe(${q(ELE)}).st.extra`), 0);
+});
+test("écrans du repos : ⋯ ouvre les actions de l'exercice annoncé (le superset s'y active)", async () => {
+  const b = await chargerCarnet({ stockage: sansSs([{ nom: DC, series: fois(3, 42.5, 6) }]) });
+  b.evaluer(`dessiner(); validerSerie(${q(DC)}); dessiner()`);   // dernière série du développé : repos, triceps annoncé
+  assert.equal(b.json("etatGrand()"), "repos");
+  for (const e of ["repos", "fini"]) assert.match(b.json(`corpsGrand(${q(e)})`), /data-g="menu"/);
+  clicG(b, "menu");
+  assert.deepEqual(b.json("feuilleOuverte"), { quoi: "menu", nom: TRI });
+  b.evaluer(`clicFeuille({ dataset: { superset: ${q(TRI)} }, hasAttribute: () => false, closest: () => null }, ${q(TRI)})`);
+  assert.equal(b.json(`ssActif(${q(TRI)})`), true);
+  assert.equal(b.json("etatGrand()"), "repos");
+});
+test("écran de fin d'exercice (depuis la Liste) : ⋯ sur l'exercice annoncé", async () => {
+  const b = await chargerCarnet({ stockage: sansSs([{ nom: DC, series: fois(3, 42.5, 6) }]) });
+  b.evaluer(`allerListe(); dessiner(); validerSerie(${q(DC)}); dessiner()`);
+  assert.equal(b.json("minu.mode"), "fin");
+  assert.match(b.json(`corpsGrand("fin")`), /data-g="menu"/);
+  clicG(b, "menu");
+  assert.deepEqual(b.json("feuilleOuverte"), { quoi: "menu", nom: TRI });
+});
+test("écran de fin de séance : ⋯ sur le dernier exercice fait", async () => {
+  const b = await chargerCarnet({ stockage: sansSs([{ nom: DC, series: fois(3, 42.5, 6) }, { nom: TRI, series: fois(3, 20, 12) },
+    { nom: ELE, series: fois(3, 8, 12) }]) });
+  b.evaluer(`dessiner(); validerSerie(${q(DC)}); dessiner()`);
+  assert.equal(b.json("etatGrand()"), "fin");
+  assert.equal(b.json("exoGrand()"), null);
+  assert.match(b.json(`corpsGrand("fin")`), /data-g="menu"/);
+  clicG(b, "menu");
+  assert.deepEqual(b.json("feuilleOuverte"), { quoi: "menu", nom: DC });
+});
+
+test("toucher un exercice fini pour le corriger ne change ni l'exercice à faire ni le plan de la montre", async () => {
+  const b = await chargerCarnet({ stockage: sansSs([{ nom: DC, series: [S(42.5, 6)] }, { nom: TRI, series: fois(3, 20, 12) }]) });
+  b.evaluer(`ouvert = ${q(DC)}; dessiner()`);
+  const plan = b.json("planMontre()");
+  b.evaluer(`allerListe(); dessiner(); allerExercice(${q(TRI)}); dessiner()`);
+  assert.equal(b.json("exoAffiche()"), TRI);
+  assert.equal(b.json("exoGrand()"), DC);
+  assert.deepEqual(b.json("planMontre()"), plan);
+  b.evaluer("quitterExercice()");
+  assert.equal(b.json("exoGrand()"), DC);
+});
+test("exercice fini : « + une série » du menu ⋯ en refait l'exercice en cours, à l'écran", async () => {
+  const b = await chargerCarnet({ stockage: sansSs([{ nom: DC, series: [S(42.5, 6)] }, { nom: TRI, series: fois(3, 20, 12) }]) });
+  b.evaluer(`dessiner(); allerExercice(${q(TRI)}); dessiner()`);
+  b.clic({}, ["data-plus-serie"], TRI);
+  assert.equal(b.json("exoAffiche()"), TRI);
+  assert.equal(b.json("exoGrand()"), TRI);
+  assert.match(b.json(`corpsGrand("serie")`), /Série 4 faite/);
+});
+
+test("la ligne de repos d'un autre onglet mène à l'écran du repos de la Séance", async () => {
+  const b = await chargerCarnet({ stockage: sansSs([]) });
+  b.evaluer(`dessiner(); validerSerie(${q(DC)}); allerListe(); onglet = "sante"; dessiner()`);
+  assert.equal(b.json("grandVu"), false);
+  // le panneau compact (hors vue Exercice) touché hors de ses boutons
+  b.evaluer(`$("#minuteur").classList = { contains: (c) => c === "compact", add() {}, remove() {}, toggle() {} };
+    clicMinuteur({ target: { closest: () => null } })`);
+  assert.equal(b.json("onglet"), "seance");
+  assert.equal(b.json("vue"), "exercice");
+  assert.equal(b.json("grandVu"), true);
+  assert.equal(b.json("etatGrand()"), "repos");
+  assert.deepEqual(b.stockage()["carnet:vue"], { vue: "exercice", jour: JOUR });
 });

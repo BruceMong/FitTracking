@@ -104,3 +104,72 @@ test("menu ⋯ : la mesure (répétitions / secondes) seulement sans charge, ava
   assert.equal(c.json(`mesureDe(${q(DC)})`), "duree");
   assert.match(c.json(`menuExo(${q(DC)})`), /data-mesure="reps"[^>]*>Compter en répétitions/);
 });
+
+test("menu ⋯ : « Hors progression » caché quand toute la séance est hors progression", async () => {
+  const b = await chargerCarnet({ stockage: avecCtx() });
+  assert.match(b.json(`menuExo(${q(DC)})`), /data-hp/);
+  b.evaluer("seanceDuJour().hp = true");
+  assert.doesNotMatch(b.json(`menuExo(${q(DC)})`), /data-hp/);
+});
+
+// La charge et les répétitions se tapent aussi : un champ entre les − / +, dans la feuille et dans la vue Exercice.
+const champ = (h, c) => h.match(new RegExp(`<input [^>]*data-champ="${c}"[^>]*>`))?.[0] ?? "";
+test("feuille d'une série : charge et répétitions en champs à taper", async () => {
+  const b = await chargerCarnet({ stockage: avecCtx() });
+  b.evaluer(`validerSerie(${q(DC)})`);
+  const h = b.json(`feuilleSerie(${q(DC)}, 0, false)`);
+  assert.match(champ(h, "c"), /inputmode="decimal"/);
+  assert.match(champ(h, "c"), /placeholder="pdc"/);
+  assert.match(champ(h, "c"), /value="42,5"/);
+  assert.match(champ(h, "c"), /enterkeyhint="done"/);
+  assert.match(champ(h, "r"), /inputmode="numeric"/);
+  assert.match(champ(h, "r"), /value="6"/);
+  assert.match(h, /data-pm="c"/);
+});
+test("vue Exercice : charge et répétitions en champs à taper", async () => {
+  const b = await chargerCarnet({ stockage: avecCtx({ "carnet:cle": "cle-essai" }) });
+  b.evaluer("dessiner()");
+  const h = b.json(`corpsGrand("serie")`);
+  assert.match(champ(h, "c"), /inputmode="decimal"/);
+  assert.match(champ(h, "c"), /placeholder="pdc"/);
+  assert.match(champ(h, "c"), /value="42,5"/);
+  assert.match(champ(h, "r"), /inputmode="numeric"/);
+  assert.match(champ(h, "r"), /enterkeyhint="done"/);
+  assert.match(h, /data-pm="c" data-d="-1"/);
+});
+test("une charge tapée puis validée règle la série prévue, le champ est quitté et la vue redessinée", async () => {
+  const b = await chargerCarnet({ stockage: avecCtx({ "carnet:cle": "cle-essai" }) });
+  b.evaluer("dessiner()");
+  const el = b.taper(DC, 0, "c", "60");
+  assert.equal(el.flou, true);
+  assert.equal(b.json(`aFaire(${q(DC)}).l.c`), 60);
+  b.lancerMinuteurs();
+  assert.match(champ(b.json(`$("#g-corps").innerHTML`), "c"), /value="60"/);
+  b.taper(DC, 0, "c", "pdc");
+  assert.equal(b.json(`aFaire(${q(DC)}).l.c`), 0);
+  b.taper(DC, 0, "r", "8");
+  assert.equal(b.json(`aFaire(${q(DC)}).l.r`), 8);
+  b.taper(DC, 0, "r", "abc");   // illisible : rien ne change
+  assert.equal(b.json(`aFaire(${q(DC)}).l.r`), 8);
+});
+test("une valeur tapée dans la feuille corrige la série faite", async () => {
+  const b = await chargerCarnet({ stockage: avecCtx({ "carnet:cle": "cle-essai" }) });
+  b.evaluer(`dessiner(); validerSerie(${q(DC)}); ouvrirFeuille(feuilleSerie(${q(DC)}, 0, false), { quoi: "serie", nom: ${q(DC)}, k: 0, ech: false })`);
+  b.taper(DC, 0, "c", "47,5");
+  b.lancerMinuteurs();
+  assert.equal(b.json("seanceDuJour().exos[0].series[0].c"), 47.5);
+  assert.match(champ(b.json(`$("#feuille-corps").innerHTML`), "c"), /value="47,5"/);
+});
+test("un champ en cours de saisie n'est pas effacé par un redessin", async () => {
+  const b = await chargerCarnet({ stockage: avecCtx({ "carnet:cle": "cle-essai" }) });
+  b.evaluer(`dessiner(); ouvrirFeuille(feuilleSerie(${q(DC)}, 1, false), { quoi: "serie", nom: ${q(DC)}, k: 1, ech: false })`);
+  const vue = b.json(`$("#g-corps").innerHTML`), feuille = b.json(`$("#feuille-corps").innerHTML`);
+  // le doigt dans un champ : un changement venu d'ailleurs (la montre, la base) ne réécrit ni la vue ni la feuille
+  b.evaluer(`document.activeElement = { dataset: { champ: "c" } }; regler(${q(DC)}, 0, false, "r", 3); dessiner()`);
+  assert.equal(b.json(`$("#g-corps").innerHTML`), vue);
+  assert.equal(b.json(`$("#feuille-corps").innerHTML`), feuille);
+  // le champ quitté : tout se remet à jour
+  b.evaluer("document.activeElement = null; dessiner()");
+  assert.notEqual(b.json(`$("#g-corps").innerHTML`), vue);
+  assert.notEqual(b.json(`$("#feuille-corps").innerHTML`), feuille);
+});
