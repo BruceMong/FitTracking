@@ -82,3 +82,25 @@ test("toucher une pastille ou ⋯ ouvre la feuille de l'exercice affiché", asyn
   b.evaluer(`clicGrand({ target: { closest: (sel) => sel === "[data-g]" ? { dataset: { g: "menu" } } : null } })`);
   assert.deepEqual(b.json("feuilleOuverte"), { quoi: "menu", nom: DC });
 });
+test("menu ⋯ : le superset se coupe et se réactive par le clic de la feuille", async () => {
+  const b = await chargerCarnet({ stockage: avecCtx() });
+  const clic = (attrs) => b.evaluer(`clicFeuille({ dataset: ${q(attrs)}, hasAttribute: () => false, closest: () => null }, ${q(TRI)})`);
+  assert.equal(b.json(`ssActif(${q(TRI)})`), true);
+  clic({ superset: TRI });
+  assert.equal(b.json(`ssActif(${q(TRI)})`), false);
+  assert.doesNotMatch(b.json(`menuExo(${q(TRI)})`), /f-case on/);
+  clic({ superset: TRI });
+  assert.equal(b.json(`ssActif(${q(TRI)})`), true);
+  assert.match(b.json(`menuExo(${q(TRI)})`), /f-case on/);
+});
+test("menu ⋯ : la mesure (répétitions / secondes) seulement sans charge, avant « Hors progression »", async () => {
+  const b = await chargerCarnet({ stockage: avecCtx() });
+  assert.doesNotMatch(b.json(`menuExo(${q(DC)})`), /data-mesure/);
+  const c = await chargerCarnet({ stockage: avecCtx({ [`carnet:mesure:${DC}`]: "reps" }) });
+  const m = c.json(`menuExo(${q(DC)})`);
+  assert.match(m, /data-mesure="duree"[^>]*>Compter en secondes/);
+  assert.ok(m.indexOf("data-mesure") < m.indexOf("data-hp"));
+  c.evaluer(`clicFeuille({ dataset: { mesure: "duree" }, hasAttribute: () => false, closest: () => null }, ${q(DC)})`);
+  assert.equal(c.json(`mesureDe(${q(DC)})`), "duree");
+  assert.match(c.json(`menuExo(${q(DC)})`), /data-mesure="reps"[^>]*>Compter en répétitions/);
+});

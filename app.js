@@ -2754,6 +2754,7 @@ function menuExo(nom) {
     ${mode === "charge" ? ligne("data-plus-ech", "+ échauffement") : ""}
     ${ligne("data-remplacer", "Remplacer l'exercice")}
     ${part ? ligne(`data-superset="${esc(nom)}"`, `Superset avec ${esc(part)}`, caseA(ssActif(nom))) : ""}
+    ${mode !== "charge" ? ligne(`data-mesure="${mode === "duree" ? "reps" : "duree"}"`, mode === "duree" ? "Compter en répétitions" : "Compter en secondes") : ""}
     ${ligne("data-hp", "Hors progression", caseA(!!e?.hp))}</div>`;
 }
 
@@ -2820,6 +2821,10 @@ function clicFeuille(t, nom) {
     if (!e && v) { e = { nom, series: [] }; s.exos.push(e); }
     if (e) { if (v) e.note = v; else delete e.note; }
     feuilleOuverte = { quoi: "menu", nom }; sauver();
+  } else if (t.dataset.superset) {
+    basculerSuperset(t.dataset.superset);   // la case du menu suit : la feuille se redessine sur son sujet
+  } else if (t.dataset.mesure) {
+    ecrire(`carnet:mesure:${nom}`, t.dataset.mesure); delete saisie[nom];
   } else if (t.hasAttribute("data-plus-serie") || t.hasAttribute("data-plus-ech") || t.hasAttribute("data-remplacer") || t.dataset.fiche) {
     fermerFeuille(); return false;   // l'action a lieu sur l'écran (ou dans son propre dialogue)
   } else return false;
