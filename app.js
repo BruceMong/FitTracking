@@ -205,23 +205,32 @@ function cible(der, nom) {
   if (!charges.length) return null;
   const haut = Math.max(...charges);
   const aHaut = series.filter((s) => s[0] === haut).map((s) => s[1]);
-  if (haut === 0) return { texte: `vise ${Math.max(...aHaut) + 1} à la première série`, c: 0, r: Math.max(...aHaut) + 1 };
+  // `rs` : les répétitions visées série par série, reprises telles quelles par les lignes prévues
+  // (« vise 8, 8, 6 » se lit 8, 8, 6 dans les séries à faire) ; `r` reste la plus basse, pour l'ancien usage.
+  const fois = (r) => Array(n).fill(r);
+  if (haut === 0) {
+    const t = [...aHaut].sort((a, b) => b - a).slice(0, n);
+    t[0] += 1;
+    while (t.length < n) t.push(t[t.length - 1]);
+    return { texte: `vise ${t[0]} à la première série`, c: 0, r: t[0], rs: t };
+  }
   const h = ctx?.historique?.[nom];
   if (h?.stagne && h.decharge && h.jour === der.jour)
     return { texte: `rien de gagné en 3 séances → décharge : ${kg(h.decharge)} kg, ${n}×${reps} sans forcer, puis on remonte`,
-             c: h.decharge, r: reps, decharge: true };
+             c: h.decharge, r: reps, rs: fois(reps), decharge: true };
   if (aHaut.length >= n && Math.min(...aHaut) >= reps) {
     // Après une hausse : 75 % du schéma, d'où l'on remonte (4×8 → 6-7, 4×6 → 5-6, 3×12 → 9-10).
     const bas = Math.max(1, Math.round(reps * 0.75));
     const notes = series.map((x, i) => [x[0], der.rir?.[i]]).filter(([c, e]) => c === haut && e != null).map((x) => x[1]);
     if (notes.length >= n && Math.min(...notes) >= 3 && !PRUDENCE.has(nom))
-      return { texte: `${n}×${reps} tenu, 3 en réserve partout → deux crans (+5 kg, ou deux paires d'haltères au-dessus), vise ${n}×${bas}-${bas + 1}`, c: haut, r: bas, monte: true };
-    return { texte: `${n}×${reps} tenu → charge suivante, vise ${n}×${bas}-${bas + 1}`, c: haut, r: bas, monte: true };
+      return { texte: `${n}×${reps} tenu, 3 en réserve partout → deux crans (+5 kg, ou deux paires d'haltères au-dessus), vise ${n}×${bas}-${bas + 1}`, c: haut, r: bas, rs: fois(bas), monte: true };
+    return { texte: `${n}×${reps} tenu → charge suivante, vise ${n}×${bas}-${bas + 1}`, c: haut, r: bas, rs: fois(bas), monte: true };
   }
-  if (aHaut.length < n) return { texte: `reste à ${kg(haut)} : vise ${n} séries`, c: haut, r: reps };
+  if (aHaut.length < n) return { texte: `reste à ${kg(haut)} : vise ${n} séries`, c: haut, r: reps, rs: fois(reps) };
   const vise = [...aHaut].sort((a, b) => b - a).slice(0, n);
   vise[vise.length - 1] = Math.min(reps, vise[vise.length - 1] + 1);
-  return { texte: `reste à ${kg(haut)} : vise ${vise.join(", ")}`, c: haut, r: vise[vise.length - 1] };
+  vise.sort((a, b) => b - a);   // 6, 6, 5, 5 → 6, 6, 6, 5 (et non 6, 6, 5, 6)
+  return { texte: `reste à ${kg(haut)} : vise ${vise.join(", ")}`, c: haut, r: vise[vise.length - 1], rs: vise };
 }
 
 // ───────────────────────────────────────── les lignes de séries
@@ -254,8 +263,10 @@ function lignesDe(nom) {
   const sc = schemaDe(nom);
   const n = sc.series;
   // Une ligne prévue reprend la charge travaillée, mais vise toujours les répétitions de la cible
-  // (sc.reps / ci.r), jamais celles d'une série ratée : rater 6 au lieu de 8 ne doit pas faire
-  // proposer 6 aux séries suivantes, et la prochaine séance repart de la cible, sans re-réglage.
+  // pour son rang (ci.rs[k] : « vise 8, 8, 6 » donne 8, 8, 6 ; sc.reps sans cible), jamais celles
+  // d'une série ratée : rater 6 au lieu de 8 ne doit pas faire proposer 6 aux séries suivantes, et la
+  // prochaine séance repart de la cible, sans re-réglage. Régler une ligne fait suivre sa charge, pas
+  // ses répétitions, qui restent celles de la cible de chaque rang.
   let prec = mode === "duree" ? { c: 0, r: der?.series?.[0]?.[1] || 30 }
     : mode === "reps" ? { c: 0, r: der?.series?.[0]?.[1] || 10 }
     : { c: faites.length ? faites[faites.length - 1].c : (ci?.c ?? der?.series?.[0]?.[0] ?? 20),
@@ -263,8 +274,10 @@ function lignesDe(nom) {
   const L = faites.map((x, k) => ({ k, c: x.c, r: x.r, e: x.e, fait: true }));
   for (let j = 0; j < Math.max(0, n - faites.length) + st.extra; j++) {
     const k = faites.length + j;
-    prec = { ...prec, ...(st.edits[k] || {}) };
-    L.push({ k, c: prec.c, r: prec.r, fait: false });
+    const ed = st.edits[k];
+    prec = { ...prec, ...(ed || {}) };
+    const r = mode === "charge" && !ed?.r && ci?.rs ? (ci.rs[k] ?? ci.rs[ci.rs.length - 1]) : prec.r;
+    L.push({ k, c: prec.c, r, fait: false });
   }
   const k0 = faites.length;   // la prochaine série
   // L'échauffement : à part (e.ech), hors séries, volume, récupération et cible. Une ligne prévue
@@ -1423,7 +1436,7 @@ function validerSerie(nom) {
   // La réserve se note pendant le repos, pour les séries avec charge seulement : une tenue ou un
   // exercice de posture n'ont pas d'« échec » à approcher.
   // `vise` : les répétitions de la cible, pour que la question dise « 4 sur 6 » quand la série est ratée.
-  if (mode === "charge") { minu.effort = { nom, i: e.series.length - 1, vise: ci?.r ?? schemaDe(nom).reps }; garder(); }
+  if (mode === "charge") { minu.effort = { nom, i: e.series.length - 1, vise: ci?.rs?.[e.series.length - 1] ?? ci?.r ?? schemaDe(nom).reps }; garder(); }
 }
 
 // Changer le type de la séance. Quand des séries (ou des échauffements) sont déjà notées, le changement les sépare
@@ -2324,7 +2337,7 @@ function reposDepuisAppli(a, { ts, effort = false } = {}) {
   // Une fin déjà passée a sonné à la montre : pas une seconde fois ici (prolongé par +15, il sonnera à sa fin).
   if (effort && !a.ech && a.jour === jour) {
     const { e, mode, ci } = lignesDe(a.nom), i = e?.series?.findIndex((x) => x.m === a.id) ?? -1;
-    if (mode === "charge" && i >= 0) minu.effort = { nom: a.nom, i, vise: ci?.r ?? schemaDe(a.nom).reps };
+    if (mode === "charge" && i >= 0) minu.effort = { nom: a.nom, i, vise: ci?.rs?.[i] ?? ci?.r ?? schemaDe(a.nom).reps };
   }
   sonne = fin <= Date.now(); garder();
 }

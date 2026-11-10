@@ -165,7 +165,7 @@ test("un champ en cours de saisie n'est pas effacé par un redessin", async () =
   b.evaluer(`dessiner(); ouvrirFeuille(feuilleSerie(${q(DC)}, 1, false), { quoi: "serie", nom: ${q(DC)}, k: 1, ech: false })`);
   const vue = b.json(`$("#g-corps").innerHTML`), feuille = b.json(`$("#feuille-corps").innerHTML`);
   // le doigt dans un champ : un changement venu d'ailleurs (la montre, la base) ne réécrit ni la vue ni la feuille
-  b.evaluer(`document.activeElement = { dataset: { champ: "c" } }; regler(${q(DC)}, 0, false, "r", 3); dessiner()`);
+  b.evaluer(`document.activeElement = { dataset: { champ: "c" } }; regler(${q(DC)}, 1, false, "r", 3); dessiner()`);
   assert.equal(b.json(`$("#g-corps").innerHTML`), vue);
   assert.equal(b.json(`$("#feuille-corps").innerHTML`), feuille);
   // le champ quitté : tout se remet à jour
