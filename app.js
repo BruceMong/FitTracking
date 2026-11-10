@@ -149,23 +149,39 @@ function schemaDe(nom) {
 // On enchaîne une série de chacun, puis un seul repos (120 s). Clé stable d'une paire = les deux noms triés.
 const partenaireSuperset = (nom) => ctx?.supersets?.[nom];
 const clefSuperset = (a, b) => [a, b].sort().join(" + ");
-// Paires débranchées pour la journée (machine prise, pas envie) : l'étiquette ⚡ de la carte bascule, ou
-// « Sans superset » pendant l'enchaînement. Gardé par jour dans le téléphone : un rafraîchissement ne la rebranche pas.
-const SS_OFF = `carnet:ss-off:${jour}`;
-const ssOff = new Set(lire(SS_OFF, []));
-// Valeurs vues au dernier dessiner() : la saisie et les paires coupées changent le plan de la montre.
-let saisieVue = JSON.stringify(saisie), ssOffVu = JSON.stringify([...ssOff]), exoGrandVu;
-// Les clés « du jour » (paires coupées, saisie, appuis de la montre notés et annulés) : celles des jours passés partent.
-const PAR_JOUR = ["carnet:ss-off:", "carnet:saisie:", "carnet:montre-notes:", "carnet:montre-annules:"];
+// Paires enchaînées pour la journée : le superset du programme est désactivé par défaut, on l'active au besoin
+// (étiquette ⚡ de la carte, ou « Sans superset » pendant l'enchaînement pour le couper). Gardé par jour dans le
+// téléphone : un rafraîchissement ne le débranche pas.
+const SS_ON = `carnet:ss-on:${jour}`;
+const ssOn = new Set(lire(SS_ON, []));
+// Ancienne clé (superset actif par défaut, paires coupées) : sans objet, on la retire.
+try { localStorage.removeItem(`carnet:ss-off:${jour}`); } catch {}
+// Valeurs vues au dernier dessiner() : la saisie et les paires activées changent le plan de la montre.
+let saisieVue = JSON.stringify(saisie), ssOnVu = JSON.stringify([...ssOn]), exoGrandVu;
+// Les clés « du jour » (paires activées, saisie, appuis de la montre notés et annulés) : celles des jours passés partent.
+const PAR_JOUR = ["carnet:ss-on:", "carnet:ss-off:", "carnet:saisie:", "carnet:montre-notes:", "carnet:montre-annules:"];
 try { for (const k of Object.keys(localStorage)) if (PAR_JOUR.some((p) => k.startsWith(p) && k !== p + jour)) localStorage.removeItem(k); } catch {}
-const ssActif = (nom) => { const p = partenaireSuperset(nom); return !!p && !ssOff.has(clefSuperset(nom, p)); };
+const ssActif = (nom) => { const p = partenaireSuperset(nom); return !!p && ssOn.has(clefSuperset(nom, p)); };
 function couperSuperset(a, b, off) {
   const k = clefSuperset(a, b);
-  if (off) ssOff.add(k); else ssOff.delete(k);
-  ecrire(SS_OFF, [...ssOff]);
+  if (off) ssOn.delete(k); else ssOn.add(k);
+  ecrire(SS_ON, [...ssOn]);
   // Rien fait encore sur la paire : elle n'est plus marquée superset dans seances.md.
   const s = seanceDuJour(), ea = s.exos.find((x) => x.nom === a), eb = s.exos.find((x) => x.nom === b);
   if (off && !ea?.series?.length && !eb?.series?.length) { if (ea) delete ea.ss; if (eb) delete eb.ss; }
+}
+// Active ou coupe la paire de `nom` pour la journée ; rend l'état après bascule (faux sans partenaire).
+function basculerSuperset(nom) {
+  const a = nom, b = partenaireSuperset(a);
+  if (!b) return false;
+  const off = ssActif(a);
+  couperSuperset(a, b, off);
+  if (off && minu?.mode === "superset" && [a, b].includes(minu.nom)) {
+    const from = minu.ssFrom || minu.nom;
+    lancerRepos(from, `${from} · repos`, "");
+  }
+  toast(off ? `Sans superset aujourd'hui : ${a}, puis ${b}` : `Superset aujourd'hui : ${a} ↔ ${b}`);
+  return !off;
 }
 
 // Jamais deux crans d'un coup sur ces exercices : l'épaule droite (même liste que herdr-sante, PRUDENCE).
@@ -477,14 +493,14 @@ function exosAffiches(d) {
 
 function dessiner() {
   // Point commun à tous les gestes : la saisie du jour est gardée, et un changement (saisie, paire de
-  // superset coupée, exercice proposé ensuite : « suiv », « go », une carte ouverte) republie le plan pour
+  // superset activée, exercice proposé ensuite : « suiv », « go », une carte ouverte) republie le plan pour
   // la montre 1,5 s plus tard.
   // La saisie est écrite avant exoGrand(), dont les lignesDe y ajoutent les entrées par défaut.
-  const s = JSON.stringify(saisie), o = JSON.stringify([...ssOff]);
+  const s = JSON.stringify(saisie), o = JSON.stringify([...ssOn]);
   if (s !== saisieVue) ecrire(`carnet:saisie:${jour}`, saisie);
   const g = exoGrand();
-  if (s !== saisieVue || o !== ssOffVu || g !== exoGrandVu) {
-    saisieVue = s; ssOffVu = o; exoGrandVu = g;
+  if (s !== saisieVue || o !== ssOnVu || g !== exoGrandVu) {
+    saisieVue = s; ssOnVu = o; exoGrandVu = g;
     programmerPublication();
   }
   dessinerPage(); majGrand(true);
@@ -556,7 +572,7 @@ function dessinerPage() {
     const partN = partenaireSuperset(nom);
     if (partN) tg.push(ssActif(nom)
       ? `<button class="tag ss" data-superset="${esc(nom)}">⚡ superset · ${esc(partN)} <b>✕</b></button>`
-      : `<button class="tag ss off" data-superset="${esc(nom)}">sans superset · <b>réactiver</b></button>`);
+      : `<button class="tag ss off" data-superset="${esc(nom)}">superset · <b>activer</b></button>`);
     if (rec?.charge) tg.push(`<span class="tag">record ${kg(rec.charge)} kg</span>`);
     else if (rec?.reps) tg.push(`<span class="tag">record ${rec.reps} reps</span>`);
     if (hp) tg.push(`<span class="tag jaune">hors progression</span>`);
@@ -1373,7 +1389,7 @@ function noterSerie(nom, t = new Date().toTimeString().slice(0, 8)) {
 // - { quoi: "fin", autre } : l'exercice est fini ; autre : un autre exercice affiché a encore des séries ;
 // - { quoi: "repos", duree: 120, ss: true } : repos après la paire du superset ;
 // - { quoi: "repos", duree } : le repos de l'exercice.
-// « Repos seul » (ssOff) débranche la paire pour la séance (machine occupée) : chacun se fait seul.
+// « Repos seul » coupe la paire activée pour la séance (machine occupée) : chacun se fait seul.
 function suiteApres(nom, { e, L, k0, n }) {
   const s = seanceDuJour();
   const part = partenaireSuperset(nom), ssOn = ssActif(nom);
@@ -1430,14 +1446,8 @@ document.addEventListener("click", (ev) => {
   } else if (t.dataset.soin) {
     ouvrirSoin(t.dataset.soin); return;
   } else if (t.dataset.superset) {
-    // L'étiquette ⚡ coupe (ou rebranche) la paire pour la journée ; chaque exercice se fait alors seul.
-    const a = t.dataset.superset, b = partenaireSuperset(a), off = ssActif(a);
-    couperSuperset(a, b, off);
-    if (off && minu?.mode === "superset" && [a, b].includes(minu.nom)) {
-      const from = minu.ssFrom || minu.nom;
-      lancerRepos(from, `${from} · repos`, "");
-    }
-    toast(off ? `Sans superset aujourd'hui : ${a}, puis ${b}` : `Superset rebranché : ${a} ↔ ${b}`);
+    // L'étiquette ⚡ active (ou coupe) la paire pour la journée.
+    basculerSuperset(t.dataset.superset);
     dessiner(); return;
   } else if (t.closest("[data-memo]")) {
     memoEdite = t.closest("[data-memo]").dataset.memo;
@@ -2547,7 +2557,7 @@ function clicMinuteur(ev) {
     const from = minu.ssFrom, partner = minu.nom;
     if (from && partner) couperSuperset(from, partner, true);
     lancerRepos(from || partner, `${from || partner} · repos`, "");
-    return envoyerPlanPont();   // ssOff a changé : bit superset et ordre des étapes (pas de dessiner() ici)
+    return envoyerPlanPont();   // ssOn a changé : bit superset et ordre des étapes (pas de dessiner() ici)
   }
   if (a === "repos2" || a === "repos1") {
     minu = { ...minu, mode: "repos", quoi: `Repos avant l'exercice suivant`, cible: "", duree: a === "repos2" ? 120 : 90, debut: Date.now() };

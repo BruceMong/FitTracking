@@ -3,7 +3,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { chargerCarnet } from "./banc.mjs";
-import { JOUR, DC, TRI, ELE, ctxPush, avecCtx, enCours } from "./fixtures.mjs";
+import { JOUR, DC, TRI, ELE, ctxPush, avecCtx, avecCtxSansSs, enCours } from "./fixtures.mjs";
 
 const q = JSON.stringify;
 const etapes = (b) => b.json("planMontre().etapes");
@@ -51,7 +51,7 @@ test("plan en cours de séance : séries faites retirées, charges réglées sui
 });
 
 test("plan_superset_debranche : chaque exercice seul, repos normal", async () => {
-  const b = await chargerCarnet({ stockage: avecCtx({ "carnet:ss-off:2026-11-09": [`${TRI} + ${ELE}`] }) });
+  const b = await chargerCarnet({ stockage: avecCtxSansSs() });
   assert.deepEqual(ids(b).slice(4), [T(0), T(1), T(2), E(0), E(1), E(2)]);
   assert.deepEqual(etapes(b).slice(4).map((e) => e.repos), [90, 90, 120, 90, 90, 0]);
   assert.equal(etapes(b)[4].quoi, "série 1/3");
