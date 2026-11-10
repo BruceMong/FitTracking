@@ -104,6 +104,9 @@ service worker) pour noter ses séries au téléphone, à la salle, même sans r
   fois), garde de rang (« déjà noté » si la série existe), heure de la série = heure de l'appui. Le repos du téléphone
   s'aligne sur celui de la montre, sans notification de fin. La saisie du jour est gardée par jour (`carnet:saisie:<jour>`),
   pour survivre au rechargement. Le chemin par notification ci-dessus reste valable.
+- **Retour (APK)** : le geste retour d'Android referme d'abord un sous-menu ouvert (feuille d'une série, menu ⋯, fiche,
+  ajout d'un exercice) ; sinon l'appli passe en arrière-plan, comme un retour au menu des applis, sans se fermer
+  (`carnetRetour`, appelé par `MainActivity`). Dans Chrome, le retour reste celui du navigateur.
 - **Dans l'APK : la montre en direct** (Chrome inchangé : tout passe par le plugin `Montre`, `pont.js`, refusé hors de
   l'APK ; sans pont ni montre présente, rien ne part). **Envoyé** par le Bluetooth, un message par clé (le plus récent
   remplace l'ancien) : le `repos` avec son heure de fin **absolue** (la montre compte seule, rien à renvoyer à chaque
