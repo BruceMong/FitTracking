@@ -379,16 +379,14 @@
   .rapport .rp-dates { flex-wrap: wrap; margin-top: 4px; }
   .rapport .rp-dates button { flex: 0 0 auto; padding: 6px 12px; background: var(--bg); }
   .rapport .rp-dates button.choisi { background: var(--carte2); }
-  /* Le grand format : tout le menu de série en plein écran, pensé pour une fenêtre réduite. Les tailles
-     suivent la fenêtre (vw, vh), et plus elle est petite, plus il ne reste que l'essentiel. */
-  .minuteur .quoi { padding-right: 40px; }
-  .minuteur .min-grand { position: absolute; top: 6px; right: 6px; width: 40px; height: 40px; padding: 0;
-    display: grid; place-items: center; background: var(--carte); color: var(--texte); }
   .montre-journal { margin: 8px 0 0 34px; font-size: 12px; line-height: 1.6; font-variant-numeric: tabular-nums; }
-  .grand-lien { display: inline-flex; align-items: center; gap: 6px; color: var(--bleu); margin-top: 6px; }
-  .grand-lien svg { width: 15px; height: 15px; }
+  /* La vue Exercice : toute la page au-dessus de la barre d'onglets, qui reste visible et touchable. Pensée aussi
+     pour une fenêtre réduite : les tailles suivent la fenêtre (vw, vh), et plus elle est petite, plus il ne reste
+     que l'essentiel. */
   body:has(#grand.ouvert) { overflow: hidden; }
-  #grand { display: none; position: fixed; inset: 0; z-index: 45; background: #000; color: var(--texte); overflow: hidden; }
+  #grand { display: none; position: fixed; top: 0; left: 0; right: 0; bottom: calc(57px + env(safe-area-inset-bottom)); z-index: 35;
+    background: #000; color: var(--texte); overflow: hidden; padding: 0; border: 0; border-radius: 0; font-size: 16px; }
+  /* (padding, bordure, coins et taille : les classes d'état « serie » et « pause » sont aussi celles des puces et des pauses.) */
   #grand.ouvert { display: block; animation: g-entree .16s ease-out; }
   @keyframes g-entree { from { opacity: 0; transform: scale(.98); } }
   /* Toute la fenêtre est la jauge : elle monte du bas pendant le repos. */
@@ -398,14 +396,32 @@
   #grand.pause #g-niveau { background: rgba(255, 214, 10, .16); }
   #grand.fini #g-niveau { display: none; }
   #g-corps { position: relative; height: 100%; box-sizing: border-box; display: flex; flex-direction: column; gap: clamp(6px, 1.6vh, 14px);
-    padding: calc(clamp(8px, 2vh, 16px) + env(safe-area-inset-top)) clamp(8px, 3vw, 16px) calc(clamp(8px, 2vh, 16px) + env(safe-area-inset-bottom)); }
+    padding: calc(clamp(8px, 2vh, 16px) + env(safe-area-inset-top)) clamp(8px, 3vw, 16px) clamp(8px, 2vh, 16px); }
   .g-tete { display: flex; align-items: center; gap: 6px; min-height: 44px; }
   .g-titre { flex: 1; min-width: 0; }
   .g-titre b { display: block; font-size: clamp(15px, 5vw, 22px); line-height: 1.2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .g-titre span { display: block; font-size: clamp(12px, 3.6vw, 15px); opacity: .72; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  /* En série, l'en-tête porte aussi ‹ ›, ☰ et ⋯ : le nom et sa ligne passent sur deux lignes au besoin. */
+  .g-tete:has([data-g=menu]) .g-titre b { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; font-size: clamp(15px, 4.6vw, 20px); }
+  .g-tete:has([data-g=menu]) .g-titre span { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
   #grand button { font: inherit; color: inherit; border-radius: 14px; border: 1px solid rgba(255, 255, 255, .22); background: rgba(0, 0, 0, .5); touch-action: manipulation; }
   #grand button:active { transform: scale(.97); }
-  #grand .g-reduire, #grand .g-fleche { flex: none; width: 44px; height: 44px; padding: 0; display: grid; place-items: center; font-size: 26px; line-height: 1; }
+  #grand .g-fleche, #grand .g-outils button { flex: none; width: 44px; height: 44px; padding: 0; display: grid; place-items: center; font-size: 26px; line-height: 1; }
+  .g-outils { flex: none; display: flex; gap: 6px; margin-left: 4px; }
+  #grand .g-outils button { font-size: 22px; }
+  /* Sous l'en-tête : la dernière fois, la cible (information, pas un lien : pas de bleu), le record, le mémo. */
+  .g-infos { display: flex; flex-direction: column; gap: 2px; font-size: clamp(13px, 3.8vw, 15px); line-height: 1.35; opacity: .8; }
+  .g-infos > div { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .g-info { color: #f2f2f7; opacity: 1; }
+  .g-info.decharge { color: var(--jaune); }
+  /* Une pastille par série : faite (vert), prochaine (entourée), prévue (pointillés). */
+  .g-pastilles { display: flex; flex-wrap: wrap; gap: 6px; }
+  #grand .g-pastilles button { min-height: 44px; min-width: 56px; padding: 0 10px; border-radius: 12px; font-size: clamp(14px, 4vw, 16px);
+    font-variant-numeric: tabular-nums; }
+  #grand .g-pastilles button.fait { background: var(--vert); border-color: var(--vert); color: #04130a; font-weight: 700; }
+  #grand .g-pastilles button.prochaine { border: 2px solid #fff; font-weight: 700; }
+  #grand .g-pastilles button.prevue { border-style: dashed; opacity: .75; }
+  #grand .g-pastilles small { margin-left: 3px; font-size: 12px; opacity: .8; color: inherit; }
   .g-milieu { flex: 1; min-height: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: clamp(4px, 1.4vh, 12px); text-align: center; }
   .g-chrono { font-size: min(34vw, 32vh); font-weight: 800; line-height: .95; letter-spacing: -.03em; font-variant-numeric: tabular-nums; }
   #grand.fini .g-chrono { font-size: min(27vw, 30vh); }   /* « +0:12 » a un caractère de plus */
@@ -427,15 +443,12 @@
   /* La ligne de réglage : mêmes gestes que dans la carte, mais à l'échelle du pouce. */
   #grand .g-ligne { display: flex; flex-wrap: wrap; justify-content: center; gap: clamp(6px, 1.6vh, 12px); width: 100%; min-height: 0; padding: 0; background: none; border: 0; }
   .g-pm { flex: 1 1 200px; display: grid; grid-template-columns: minmax(44px, 1fr) minmax(0, 1.2fr) minmax(44px, 1fr); align-items: center; gap: 6px; }
-  #grand .g-pm button { height: clamp(52px, 12vh, 92px); padding: 0; font-size: clamp(26px, 8vw, 40px); line-height: 1; }
+  #grand .g-pm button { height: clamp(56px, 12vh, 92px); padding: 0; font-size: clamp(26px, 8vw, 40px); line-height: 1; }
   .g-val { text-align: center; line-height: 1; }
   .g-val b { display: block; font-size: clamp(26px, 10vw, 52px); font-weight: 800; font-variant-numeric: tabular-nums; }
   .g-val small { font-size: clamp(11px, 3.4vw, 14px); opacity: .7; }
   .g-milieu .g-ligne { flex-direction: column; flex-wrap: nowrap; }
   .g-milieu .g-pm { flex: none; width: 100%; max-width: 460px; margin: 0 auto; }
-  .g-faites { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px; font-size: clamp(13px, 3.8vw, 15px); opacity: .8; }
-  .g-faites span { padding: 3px 9px; border-radius: 999px; background: rgba(255, 255, 255, .1); }
-  .g-faites small { margin-left: 3px; opacity: .75; }
   .g-actions { display: flex; gap: 6px; }
   .g-actions > * { flex: 1; min-width: 0; }
   .g-quatre .g-second, .g-trois .g-second { height: clamp(48px, 9vh, 68px); font-size: clamp(14px, 4.2vw, 18px); padding: 0 4px; white-space: nowrap; }
@@ -459,23 +472,23 @@
     .g-zone:not(.question) .g-reserve { display: none; }
   }
   @media (max-height: 430px) {
-    .g-faites, .g-reserve span, .g-reserve small, .g-val small, #grand .g-lien { display: none; }
+    .g-reserve span, .g-reserve small, .g-val small, #grand .g-lien { display: none; }
     .g-titre span { font-size: 12px; }
     #grand .g-ajuste { display: none; }
     .g-tete { min-height: 40px; }
-    #grand .g-reduire, #grand .g-fleche { width: 40px; height: 40px; }
-    #grand .g-pm button { height: 48px; }
+    #grand .g-pm button { height: 56px; }
     .g-chrono { font-size: min(34vw, 30vh); }
   }
   @media (max-height: 430px) and (min-width: 380px) {
     #grand .g-milieu .g-ligne { flex-direction: row; }
     .g-milieu .g-pm { flex: 1 1 0; }
+    .g-val b { font-size: clamp(22px, 7vw, 30px); }   /* « pdc » ou « 42,5 » tient entre ses − / + */
   }
   @media (max-height: 340px) {
     #g-corps:has(.g-zone.question) .g-milieu .g-ligne { display: none; }   /* superset : la réserve d'abord */
   }
   @media (max-height: 300px) {
-    .g-ensuite, .g-titre span { display: none; }
+    .g-ensuite, .g-titre span, .g-infos, .g-pastilles { display: none; }
     .g-titre b { font-size: 14px; }
     .g-zone:not(.question) { display: none; }
     #grand .g-reserve button { height: 44px; }
@@ -516,7 +529,6 @@
 <input type="file" id="fichier-musique" accept="audio/*,.mp3" multiple hidden>
 <audio id="audio" preload="none"></audio>
 <div class="minuteur" id="minuteur">
-  <button class="min-grand" data-min="grand" aria-label="Agrandir : grand format"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 3H3v6M15 3h6v6M9 21H3v-6M15 21h6v-6"/></svg></button>
   <div class="quoi" id="min-quoi"></div>
   <div class="haut"><div class="chrono" id="chrono">1:30</div><div class="sous" id="min-cible"></div></div>
   <div class="jauge"><i id="min-jauge"></i></div>
