@@ -104,7 +104,7 @@ let vue = lire("carnet:vue")?.jour === jour && lire("carnet:vue").vue === "liste
 let doc = lire(`carnet:seance:${jour}`)?.doc || null;
 let ouvert = null;                            // exercice dont la saisie est dépliée
 let saisie = lire(`carnet:saisie:${jour}`, {});  // nom → {edits: {ligne: {c, r}}, extra} : lignes prévues réglées à la main
-let memoEdite = null;                         // exercice dont le mémo est en cours de modification
+let typeTouche = null;                        // { t, quand } : dernier toucher sur un type de séance (le second confirme)
 let choisie = null;                           // [nom, ligne] sélectionnée (sinon : la prochaine série)
 let feuilleOuverte = null, feuilleHtml = "";  // la feuille du bas ouverte : { quoi: "serie" | "menu" | "memo" | "note", nom, k, ech }
 let onglet = "seance";                        // « seance », « sante » ou « progres »
@@ -541,7 +541,7 @@ function dessinerPage() {
     h += `<div class="carte conseil"><b>Repos selon la rotation</b>Posture et étirements sur le tapis.</div>`;
   }
   if (s.excuse) h += `<div class="carte conseil"><b>Jour excusé : ${esc(s.excuse.tag)}</b>Ne compte pas comme un jour manqué.</div>`;
-  h += `<div class="types">${TYPES.map((t) => `<button data-type="${t}" class="${t === s.type ? "choisi" : ""}">${t}${t === p ? " ·" : ""}</button>`).join("")}</div>`;
+  h += `<div class="types">${TYPES.map((t) => `<div class="type"><button data-type="${t}" class="${t === s.type ? "choisi" : ""}">${t}</button>${t === p ? `<span class="type-du-jour">du jour</span>` : ""}</div>`).join("")}</div>`;
   const faitesTot = s.exos.reduce((a, e) => a + (e.series?.length || 0), 0);
   let duree = "";
   if (faitesTot) {
@@ -569,81 +569,38 @@ function dessinerPage() {
   for (const nom of exosAffiches(s)) {
     const e = s.exos.find((x) => x.nom === nom);
     const faites = e?.series || [];
-    const { L, W, k0, ks, der, ci, n, pas, mode } = lignesDe(nom);
+    const { L, der, ci, n } = lignesDe(nom);
     const hp = horsProg(s, e);
-    h += `<div class="carte exo ${ouvert === nom ? "ouvert" : ""} ${faites.length >= n ? "fait" : ""}" data-exo="${esc(nom)}">
-      <h3 data-ouvrir="${esc(nom)}"><span class="nom">${esc(nom)}${FICHES[nom] ? `<button class="info" data-fiche="${esc(nom)}" aria-label="Fiche de l'exercice">i</button>` : ""}</span><span class="n">${faites.length}/${n}</span></h3>`;
+    // Toute la carte ouvre la vue Exercice (data-aller) ; les corrections se font là-bas.
+    h += `<div class="carte exo ${faites.length >= n ? "fait" : ""}" data-exo="${esc(nom)}" data-aller="${esc(nom)}">
+      <h3><span class="nom">${esc(nom)}</span><span class="n">${faites.length}/${n}</span></h3>`;
     if (der) h += `<div class="sous">${jj(der.jour)} : ${esc(formatSeries(der.series))}</div>`;
     else h += `<div class="sous">pas encore d'historique</div>`;
-    const g = groupeDe(nom), rec = ctx?.records?.[nom];
-    const tg = [];
-    if (g) tg.push(`<span class="tag ${rc[g] != null ? etatRecup(rc[g]) : ""}">${esc(g)}${rc[g] >= 0.25 ? ` · ${Math.round(rc[g] * 100)} %` : ""}</span>`);
     const partN = partenaireSuperset(nom);
-    if (partN) tg.push(ssActif(nom)
-      ? `<button class="tag ss" data-superset="${esc(nom)}">⚡ superset · ${esc(partN)} <b>✕</b></button>`
-      : `<button class="tag ss off" data-superset="${esc(nom)}">superset · <b>activer</b></button>`);
-    if (rec?.charge) tg.push(`<span class="tag">record ${kg(rec.charge)} kg</span>`);
-    else if (rec?.reps) tg.push(`<span class="tag">record ${rec.reps} reps</span>`);
+    const tg = [];
+    if (partN && ssActif(nom)) tg.push(`<span class="tag ss">⚡ avec ${esc(partN)}</span>`);
     if (hp) tg.push(`<span class="tag jaune">hors progression</span>`);
     if (tg.length) h += `<div class="tags">${tg.join("")}</div>`;
     const mm = memo(nom);
-    if (memoEdite === nom)
-      h += `<div class="ligne2"><input id="memo-champ" value="${esc(mm)}" placeholder="cran 15 · siège 3 · prise large…"><button data-memo-ok>OK</button></div>`;
-    else if (mm || ouvert === nom)
-      h += `<div class="memo" data-memo="${esc(nom)}">📌 ${mm ? esc(mm) : "<i>ajouter un mémo de réglage</i>"}</div>`;
+    if (mm) h += `<div class="memo">📌 ${esc(mm)}</div>`;
     if (hp) h += `<div class="cible">→ aujourd'hui ne compte pas : la cible reste celle de la dernière fois</div>`;
     else if (ci) h += `<div class="cible ${ci.monte ? "monte" : ""} ${ci.decharge ? "decharge" : ""}">→ ${esc(ci.texte)}</div>`;
-    if (e?.note && ouvert !== nom) h += `<div class="remarque">✎ ${esc(e.note)}</div>`;
-    if (ouvert !== nom) {
-      // Carte fermée : le résumé en puces, échauffement, faites puis prévues (pointillé). Toucher une puce ouvre la carte.
-      const echF = (e?.ech || []).map((x) => `<span class="serie ech" data-ligne="0" data-nom="${esc(nom)}">é ${kg(x.c)}×${x.r}</span>`).join("");
-      if (L.length || echF) h += `<div class="series">${echF}${L.map((l) => l.fait
-        ? `<span class="serie" data-ligne="${l.k}" data-nom="${esc(nom)}">${serieTxt(nom, l.c, l.r)}${l.e != null ? `<small>@${l.e}</small>` : ""}</span>`
-        : `<span class="prevue" data-ligne="${l.k}" data-nom="${esc(nom)}">${serieTxt(nom, l.c, l.r)}</span>`).join("")}</div>`;
-    } else {
-      // Carte ouverte : une ligne par série, chacune avec ses − / + (charge au pas de l'exercice,
-      // répétitions) et son champ ; le rond de la prochaine la valide. Comme dans openGym : pas de
-      // ligne à sélectionner avant de régler. La réserve d'une série faite se touche pour la corriger.
-      // Glisser une série faite vers la gauche la retire (Annuler), vers la droite la recopie.
-      const k0e = W.findIndex((w) => !w.fait);
-      const ligne = (l, ech) => {
-        const suivante = ech ? l.k === k0e : l.k === k0;
-        const cls = l.fait ? "fait" : suivante ? "prochaine" : "prevue";
-        const fin = l.fait ? `<span class="ls-ok fait">✓</span>`
-          : suivante ? `<button class="ls-ok" ${ech ? "data-cocher-ech" : "data-cocher"} aria-label="Valider ${ech ? "l'échauffement" : `la série ${l.k + 1}`}"></button>`
-          : `<span class="ls-ok vide"></span>`;
-        const res = ech ? (l.fait ? `<button class="ls-e" data-ech-retirer aria-label="Retirer l'échauffement">×</button>` : `<span></span>`)
-          : mode !== "charge" ? (l.fait ? `<button class="ls-e" data-serie-retirer aria-label="Retirer la série ${l.k + 1}">×</button>` : `<span></span>`)
-          : l.fait ? `<button class="ls-e ${l.e != null ? "note" : ""}" data-res aria-label="Réserve">${l.e != null ? `@${l.e === 4 ? "4+" : l.e}` : "@?"}</button>` : `<span></span>`;
-        return `<div class="ls ${cls} ${ech ? "ech" : ""} ${!ech && l.k === ks ? "sel" : ""}" data-ligne="${l.k}" data-nom="${esc(nom)}" ${ech ? 'data-ech="1"' : ""}>
-          <span class="ls-n">${ech ? "é" : l.k + 1}</span>
-          ${mode === "charge" ? `<span class="pm"><button data-pm="c" data-d="-1" aria-label="moins ${kg(pas)} kg">−</button><input data-champ="c" inputmode="decimal" enterkeyhint="done" value="${l.c ? kg(l.c) : ""}" placeholder="pdc" aria-label="charge en kg"><button data-pm="c" data-d="1" aria-label="plus ${kg(pas)} kg">+</button></span>
-          <span class="pm"><button data-pm="r" data-d="-1" aria-label="une répétition de moins">−</button><input data-champ="r" inputmode="numeric" enterkeyhint="done" value="${l.r}" aria-label="répétitions"><button data-pm="r" data-d="1" aria-label="une répétition de plus">+</button></span>`
-          : `<span class="pm large"><button data-pm="r" data-d="-1" aria-label="${mode === "duree" ? "5 secondes de moins" : "une répétition de moins"}">−</button><span class="pm-val"><input data-champ="r" inputmode="numeric" enterkeyhint="done" value="${l.r}" aria-label="${mode === "duree" ? "secondes" : "répétitions"}"><small>${mode === "duree" ? "s" : "rép."}</small></span><button data-pm="r" data-d="1" aria-label="${mode === "duree" ? "5 secondes de plus" : "une répétition de plus"}">+</button></span>`}
-          ${res}${fin}</div>`;
-      };
-      h += mode === "charge" ? `<div class="ls-tete"><span></span><span>kg · pas ${kg(pas)}</span><span>reps</span><span>rés.</span><span></span></div>`
-        : `<div class="ls-tete sans-kg"><span></span><span>${mode === "duree" ? "tenue en secondes" : "répétitions, sans charge"}</span>
-            <button class="lien petit" data-mesure="${mode === "duree" ? "reps" : "duree"}">${mode === "duree" ? "en répétitions" : "en secondes"}</button></div>`;
-      h += `
-        <div class="lignes-series">${W.map((l) => ligne(l, true)).join("")}${L.map((l) => ligne(l, false)).join("")}</div>`;
-      h += `<div class="saisie">`;
-      const ls = L.find((l) => l.k === ks);
-      if (ls) h += `<div class="sous sel-titre">Série ${ks + 1} : combien tu aurais pu en faire de plus ?</div>
-        <div class="reserve"><div class="choix">${boutonsReserve("data-reserve", ls.e)}</div></div>
-        <div class="deux"><button class="gros danger" data-retirer>Retirer</button><button class="gros secondaire" data-deselect>OK</button></div>`;
-      h += `<input class="note-exo" data-note-exo value="${esc(e?.note || "")}" placeholder="Note sur l'exercice (sensations, réglage, douleur…)">
-        <div class="liens"><button class="lien" data-plus-serie>+ une série</button>${mode === "charge" ? `<button class="lien" data-plus-ech>+ échauffement</button>` : ""}
-          <button class="lien" data-remplacer>⇄ remplacer</button></div>
-        ${s.hp ? "" : `<button class="lien petit" data-hp>${e?.hp ? "✓ hors progression aujourd'hui · annuler" : "Douleur, pas en forme : ne pas compter pour la progression"}</button>`}</div>`;
-    }
+    if (e?.note) h += `<div class="remarque">✎ ${esc(e.note)}</div>`;
+    // Le résumé en puces : échauffement, faites puis prévues (pointillé). Glisser une faite vers la gauche la retire.
+    const echF = (e?.ech || []).map((x) => `<span class="serie ech" data-ligne="0" data-nom="${esc(nom)}">é ${kg(x.c)}×${x.r}</span>`).join("");
+    if (L.length || echF) h += `<div class="series">${echF}${L.map((l) => l.fait
+      ? `<span class="serie" data-ligne="${l.k}" data-nom="${esc(nom)}">${serieTxt(nom, l.c, l.r)}${l.e != null ? `<small>@${l.e}</small>` : ""}</span>`
+      : `<span class="prevue" data-ligne="${l.k}" data-nom="${esc(nom)}">${serieTxt(nom, l.c, l.r)}</span>`).join("")}</div>`;
     h += `</div>`;
   }
   h += `<button class="lien" id="ajouter">+ Ajouter un exercice</button>`;
+  h += bilan(s, duree);
+  // La note générale : bilan de la séance, que Claude relit (seances.md, ligne « > »).
+  h += `<div class="carte"><b>Note de séance</b> <span class="sous">ce que Claude relira pour tes bilans</span>
+    <textarea id="note" style="margin-top:8px" placeholder="Comment ça s'est passé : forme, sensations, épaule, ce qui a coincé…">${esc(s.note)}</textarea></div>`;
   if (faitesTot) h += `<button class="lien petit" data-hp-seance>${s.hp ? "✓ Toute la séance hors progression · annuler"
     : "Jour sans (douleur, fatigue) : ne pas compter la séance pour la progression"}</button>`;
-  h += bilan(s, duree);
-  if (!faitesTot) {
+  else {
     // Un jour sans séance pour une raison valable : noté, il ne compte pas comme manqué.
     const ex = s.excuse;
     h += `<div class="carte"><b>${ex ? "Jour excusé" : "Pas de séance aujourd'hui ?"}</b>
@@ -651,34 +608,13 @@ function dessinerPage() {
       <div class="motifs">${MOTIFS.map((m) => `<button data-excuse="${m}" class="${ex?.tag === m ? "choisi" : ""}">${m}</button>`).join("")}</div>
       ${ex ? `<input id="excuse-texte" value="${esc(ex.texte || "")}" placeholder="Un mot (facultatif) : grippe, déplacement…">` : ""}</div>`;
   }
-  h += `<div class="carte"><button class="case ${montre ? "faite" : ""}" data-montre><i>${montre ? "✓" : ""}</i>
+  // Dans l'APK, la montre se parle en direct : ce réglage (notification relayée) ne sert qu'à Chrome.
+  if (!pont) h += `<div class="carte"><button class="case ${montre ? "faite" : ""}" data-montre><i>${montre ? "✓" : ""}</i>
     <span><b>Valider depuis la montre</b><span class="sous">à la fin de chaque repos, une notification « Série faite » que ta montre
     relaie : la toucher note la série prévue et lance le repos. Les répétitions se corrigent ensuite ici.</span></span></button>
     ${montre ? `<div class="sous montre-journal">${journalMontre.length ? `Derniers échanges avec la montre :<br>${journalMontre.slice(-5).reverse()
       .map((x) => `${new Date(x.t).toTimeString().slice(0, 8)} · ${esc(x.quoi)}`).join("<br>")}` : "Journal vide : aucune notification ni aucun appui encore."}
       <div class="ligne2"><button data-montre-test>Tester la montre</button><button data-montre-journal>Actualiser</button></div></div>` : ""}</div>`;
-  // Épaule droite : la douleur du jour règle la réintroduction des exercices en pause.
-  const dl = s.douleur;
-  h += `<div class="carte"><b>Épaule droite</b> <span class="sous">douleur aujourd'hui, de 0 à 10</span>
-    <div class="echelle">${Array.from({ length: 11 }, (_, i) => `<button data-douleur="${i}" class="${dl === i ? "choisi" : ""}"
-      style="${dl === i ? `background:${i <= 1 ? "var(--vert)" : i <= 3 ? "var(--jaune)" : "var(--rouge)"}` : ""}">${i}</button>`).join("")}</div></div>`;
-  const pes = ctx?.pesees?.length ? ctx.pesees[ctx.pesees.length - 1] : null;
-  const vieille = !pes || (new Date(jour) - new Date(pes[0])) / 864e5 > 7;
-  h += `<div class="carte"><b>Poids</b> <span class="sous">${pes ? `dernier : ${String(pes[1]).replace(".", ",")} kg le ${jj(pes[0])}` : "aucune pesée"}
-      ${vieille && !s.poids ? ' · <span class="alerte">pesée de la semaine</span>' : ""}</span>
-    <div class="ligne2"><input id="poids" inputmode="decimal" placeholder="kg, le matin à jeun" value="${s.poids ? String(s.poids).replace(".", ",") : ""}">
-      <button data-poids-ok>OK</button></div></div>`;
-  const nPhotos = lire("carnet:photos", []).length;
-  const dp = ctx?.photo_derniere;
-  const aRefaire = !dp || (new Date(jour) - new Date(dp)) / 864e5 >= 28;
-  h += `<div class="carte"><b>Photos de suivi</b> <span class="sous">${dp ? `dernières le ${jj(dp)}` : "aucune encore"}${aRefaire ? ' · <span class="alerte">à faire</span>' : ""}
-      ${nPhotos ? ` · ${nPhotos} en attente d'envoi` : ""}</span>
-    <div class="sous" style="margin-top:6px">Lumière naturelle, même endroit, toutes les 4 semaines.</div>
-    <div class="ligne2"><button data-photo="posture-profil">Posture de profil</button><button data-photo="peau">Peau</button>
-      <button data-photo="autre">Autre</button></div></div>`;
-  // La note générale, tout en bas : bilan de la séance, que Claude relit (seances.md, ligne « > »).
-  h += `<div class="carte"><b>Note de séance</b> <span class="sous">ce que Claude relira pour tes bilans</span>
-    <textarea id="note" style="margin-top:8px" placeholder="Comment ça s'est passé : forme, sensations, épaule, ce qui a coincé…">${esc(s.note)}</textarea></div>`;
   for (const x of ctx?.pause || []) h += `<p class="pause">⏸ ${esc(x.nom)} en pause : ${esc(x.raison)}</p>`;
   if (!ctx) h += `<p class="sous">Le PC n'a pas encore envoyé ton programme : il le fera à sa prochaine synchro.</p>`;
   app.innerHTML = h;
@@ -1439,13 +1375,34 @@ function validerSerie(nom) {
   if (mode === "charge") { minu.effort = { nom, i: e.series.length - 1, vise: ci?.r ?? schemaDe(nom).reps }; garder(); }
 }
 
+// Changer le type de la séance. Quand des séries (ou des échauffements) sont déjà notées, le changement les sépare
+// de leur séance : il faut toucher deux fois le même type, à moins de 3 s d'écart. Rend true si le type a changé.
+function changerType(t, maintenant = Date.now()) {
+  const s = seanceDuJour();
+  if (s.exos.some((e) => e.series?.length || e.ech?.length) && t !== s.type) {
+    if (!(typeTouche?.t === t && maintenant - typeTouche.quand <= 3000)) {
+      typeTouche = { t, quand: maintenant };
+      toast(`Toucher encore pour passer en ${t.charAt(0).toUpperCase() + t.slice(1)}`, false);
+      return false;
+    }
+  }
+  typeTouche = null;
+  s.type = t; ouvert = null; choisie = null; saisie = {}; sauver();
+  return true;
+}
+
 let sansClic = 0;   // après un glissement sur une série, le clic qui suit ne la sélectionne pas
 document.addEventListener("click", (ev) => {
   if (ev.target.closest("[data-cle-coller]")) { collerCle($("#cle-collee").value); return; }
   if (Date.now() - sansClic < 450) return;
   if (ev.target.closest("input, textarea, select")) return;   // un champ garde la main (et le clavier)
-  const t = ev.target.closest("button, h3, [data-ligne], [data-memo]");
-  if (!t) return;
+  const t = ev.target.closest("button, [data-ligne]");
+  if (!t) {
+    // Un toucher dans la carte, hors de ses boutons : la vue Exercice sur cet exercice.
+    const nm = ev.target.closest("[data-aller]")?.dataset.aller;
+    if (nm) { allerExercice(nm); choisie = null; dessiner(); }
+    return;
+  }
   const carte = t.closest("[data-exo]");
   const nom = carte?.dataset.exo;
   const s = seanceDuJour();
@@ -1454,18 +1411,6 @@ document.addEventListener("click", (ev) => {
     ouvrirFiche(t.dataset.fiche); return;
   } else if (t.dataset.soin) {
     ouvrirSoin(t.dataset.soin); return;
-  } else if (t.dataset.superset) {
-    // L'étiquette ⚡ active (ou coupe) la paire pour la journée.
-    basculerSuperset(t.dataset.superset);
-    dessiner(); return;
-  } else if (t.closest("[data-memo]")) {
-    memoEdite = t.closest("[data-memo]").dataset.memo;
-    dessiner(); setTimeout(() => $("#memo-champ")?.focus(), 0); return;
-  } else if (t.hasAttribute("data-memo-ok")) {
-    const v = $("#memo-champ").value.trim().replace(/\|/g, "/");
-    ecrire(`carnet:memo:${memoEdite}`, v);
-    s.memos = { ...(s.memos || {}), [memoEdite]: v };   // part au PC avec la séance du jour
-    memoEdite = null; sauver();
   } else if (t.dataset.onglet) {
     onglet = t.dataset.onglet; window.scrollTo(0, 0);
   } else if (t.dataset.ressenti) {
@@ -1492,9 +1437,6 @@ document.addEventListener("click", (ev) => {
     if (x) geste("objectifs", x.texte, !etatGeste("objectifs", x.texte, x.fait));
   } else if (t.dataset.corps) {
     modeCorps = t.dataset.corps; ecrire("carnet:corps", modeCorps);
-  } else if (t.dataset.reserve != null) {
-    const { e, ks } = lignesDe(nom), x = e?.series?.[ks];
-    if (x) { const k = Number(t.dataset.reserve); if (x.e === k) delete x.e; else x.e = k; sauver(); }
   } else if (t.dataset.periode) {
     periode = Number(t.dataset.periode); ecrire("carnet:periode", periode);
   } else if (t.hasAttribute("data-montre-test")) {
@@ -1520,10 +1462,7 @@ document.addEventListener("click", (ev) => {
   } else if (t.dataset.exoGraphe != null) {
     return;
   } else if (t.dataset.type) {
-    s.type = t.dataset.type; ouvert = null; choisie = null; saisie = {}; sauver();
-  } else if (t.dataset.ouvrir != null) {
-    // Le titre d'une carte de la Liste ouvre la vue Exercice sur cet exercice.
-    allerExercice(nom); choisie = null;
+    if (!changerType(t.dataset.type)) return;
   } else if (t.dataset.mesure) {
     ecrire(`carnet:mesure:${nom}`, t.dataset.mesure); delete saisie[nom];
   } else if (t.dataset.pm) {
@@ -1535,20 +1474,8 @@ document.addEventListener("click", (ev) => {
     if (t.dataset.pm === "c") regler(nom, k, ech, "c", Math.max(0, (l.c || 0) + d * pas));
     else regler(nom, k, ech, "r", l.r + d * (mesureDe(nom) === "duree" ? 5 : 1));
     navigator.vibrate?.(8);
-  } else if (t.hasAttribute("data-res")) {
-    const k = Number(t.closest(".ls").dataset.ligne);
-    choisie = choisie?.[0] === nom && choisie[1] === k ? null : [nom, k];
   } else if (t.hasAttribute("data-cocher-ech")) {
     cocherEchauffement(nom);
-  } else if (t.hasAttribute("data-serie-retirer")) {
-    // Une série sans charge (posture, tenue) n'a pas de réserve à toucher, donc pas de « Retirer » : son ×.
-    retirerSerie(nom, Number(t.closest(".ls").dataset.ligne));
-  } else if (t.hasAttribute("data-ech-retirer")) {
-    const k = Number(t.closest(".ls").dataset.ligne), e = s.exos.find((x) => x.nom === nom);
-    if (!e?.ech?.[k]) return;
-    e.ech.splice(k, 1); lignesDe(nom).st.echEdits = {};
-    if (!e.ech.length) delete e.ech;
-    sauver();
   } else if (t.hasAttribute("data-plus-ech")) {
     lignesDe(nom).st.ech++;
   } else if (t.hasAttribute("data-remplacer")) {
@@ -1567,15 +1494,10 @@ document.addEventListener("click", (ev) => {
   } else if (t.hasAttribute("data-valider") || t.hasAttribute("data-cocher")) {
     validerSerie(nom);
   } else if (t.dataset.ligne != null) {
-    // Une puce de carte fermée l'ouvre ; dans une carte ouverte, la ligne se règle par ses boutons.
-    const nm = t.dataset.nom;
-    if (ouvert === nm) return;
-    ouvert = nm; choisie = null;
-  } else if (t.hasAttribute("data-retirer")) {
-    const { ks } = lignesDe(nom);
-    retirerSerie(nom, ks);
-  } else if (t.hasAttribute("data-deselect")) {
-    choisie = null;
+    // Une puce de la Liste est un coin de sa carte : elle ouvre la vue Exercice.
+    const nm = t.closest("[data-aller]")?.dataset.aller;
+    if (!nm) return;
+    allerExercice(nm); choisie = null;
   } else if (t.hasAttribute("data-plus-serie")) {
     lignesDe(nom).st.extra++;
   } else if (t.id === "ajouter") {
@@ -1663,13 +1585,6 @@ document.addEventListener("input", (ev) => {
   if (ev.target.id === "repas-note") repasNote = ev.target.value;
   if (ev.target.id === "note-jour") geste("journal", "Note", ev.target.value);
   if (ev.target.id === "excuse-texte" && seanceDuJour().excuse) { seanceDuJour().excuse.texte = ev.target.value; sauver(); }
-  if (ev.target.hasAttribute("data-note-exo")) {
-    const nom = ev.target.closest("[data-exo]").dataset.exo, s = seanceDuJour();
-    let e = s.exos.find((x) => x.nom === nom);
-    if (!e) { e = { nom, series: [] }; s.exos.push(e); }
-    e.note = ev.target.value;
-    sauver();
-  }
 
 });
 
@@ -1782,7 +1697,7 @@ $("#fermer-ajout").addEventListener("click", () => $("#ajout").close());
 let glisse = null, annulation = null;
 document.addEventListener("touchstart", (ev) => {
   // Dans les cartes seulement : la vue Exercice porte elle-même la classe « serie » (son état).
-  const el = ev.target.closest("#app .ls.fait, #app .serie");
+  const el = ev.target.closest("#app .serie");
   glisse = el ? { el, x: ev.touches[0].clientX, y: ev.touches[0].clientY } : null;
 }, { passive: true });
 document.addEventListener("touchmove", (ev) => {
@@ -2379,7 +2294,8 @@ function majRepos() {
   const v = Math.round(Math.abs(reste));
   $("#chrono").textContent = `${reste < 0 ? "+" : ""}${Math.floor(v / 60)}:${String(v % 60).padStart(2, "0")}`;
   $("#min-jauge").style.width = `${Math.max(0, Math.min(100, 100 * (1 - reste / minu.duree)))}%`;
-  classe(`minuteur actif ${reste <= 0 ? "fini" : ""} ${minu.restant != null ? "pause" : ""}`);
+  // En vue Liste, le repos tient sur une ligne (compact) : l'exercice, le chrono, Passer ; le toucher mène à l'exercice.
+  classe(`minuteur actif compact ${reste <= 0 ? "fini" : ""} ${minu.restant != null ? "pause" : ""}`);
   boutons(`<button data-min="pause">${minu.restant != null ? "▶ Reprendre" : "⏸ Pause"}</button>`
     + `<button data-min="-15">−15 s</button><button data-min="15">+15 s</button>`
     + `<button data-min="stop" class="${reste <= 0 ? "fort" : ""}">${reste <= 0 ? "Go" : "Passer"}</button>`);
@@ -2575,6 +2491,7 @@ function clicMinuteur(ev) {
     return fait || garder();
   }
   const b = ev.target.closest("[data-min]");
+  if (!b && minu && $("#minuteur").classList.contains("compact")) { allerExercice(minu.nom); dessiner(); return; }
   if (!b || !minu) return;
   const a = b.dataset.min;
   if (a === "stop") return arreterRepos();

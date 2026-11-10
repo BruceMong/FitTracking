@@ -30,13 +30,19 @@
   .conseil.repos b { color: var(--rouge); } .conseil.leger b { color: var(--jaune); }
   .conseil.intense b, .conseil.modere b { color: var(--vert); }
   .types { display: flex; gap: 8px; margin: 12px 0 4px; overflow-x: auto; }
-  .types button { flex: 1; padding: 10px 0; border-radius: 10px; border: 0; background: var(--carte2);
+  .types .type { flex: 1; display: flex; flex-direction: column; align-items: stretch; gap: 3px; }
+  .types button { min-height: 44px; padding: 10px 0; border-radius: 10px; border: 0; background: var(--carte2);
     color: var(--texte); font-size: 15px; text-transform: capitalize; }
+  /* Le type que la rotation propose aujourd'hui : un petit libellé sous son bouton. */
+  .type-du-jour { text-align: center; font-size: 11px; color: var(--doux); line-height: 1; }
   .types button.choisi { background: var(--bleu); font-weight: 600; }
   .exo h3 { margin: 0; font-size: 17px; display: flex; justify-content: space-between; gap: 8px; }
   .exo h3 .n { color: var(--doux); font-weight: 400; font-size: 14px; white-space: nowrap; }
   .exo.fait h3 { color: var(--vert); }
-  .exo .cible { color: var(--bleu); font-size: 14px; margin-top: 2px; }
+  /* La carte entière ouvre la vue Exercice. */
+  .carte.exo { cursor: pointer; }
+  .carte.exo:active { background: var(--carte2); }
+  .exo .cible { color: var(--texte); font-size: 14px; margin-top: 2px; }
   .exo .cible.monte { color: var(--vert); }
   .series { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
   .serie { background: var(--carte2); border-radius: 8px; padding: 5px 10px; font-variant-numeric: tabular-nums;
@@ -64,6 +70,17 @@
     background: var(--carte2); border-radius: 18px; padding: 12px 14px 14px; display: none;
     box-shadow: 0 8px 30px rgba(0,0,0,.7); }
   .minuteur.actif { display: block; }
+  /* Vue Liste : le repos tient sur une ligne (exercice · chrono · Passer), la jauge en filet dessous. */
+  .minuteur.compact { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: 0 12px;
+    padding: 8px 8px 8px 14px; border-radius: 14px; }
+  .minuteur.compact .quoi { font-size: 15px; color: var(--texte); }
+  .minuteur.compact .haut { display: block; }
+  .minuteur.compact .chrono { font-size: 28px; }
+  .minuteur.compact #min-cible, .minuteur.compact .effort { display: none; }
+  .minuteur.compact .jauge { grid-column: 1 / -1; grid-row: 2; height: 3px; margin: 6px 6px 0 0; }
+  .minuteur.compact .boutons { display: block; grid-column: 3; grid-row: 1; }
+  .minuteur.compact .boutons button { display: none; }
+  .minuteur.compact .boutons button[data-min="stop"] { display: block; min-width: 84px; }
   .minuteur .quoi { font-size: 13px; color: var(--doux); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .minuteur .haut { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
   .minuteur .chrono { font-size: 40px; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1.1; }
@@ -189,8 +206,7 @@
   .tags { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 6px; }
   .tag { font-size: 12px; padding: 2px 8px; border-radius: 999px; background: var(--carte2); color: var(--doux); }
   button.tag { border: 0; font: inherit; font-size: 12px; line-height: inherit; }
-  .tag.ss { color: var(--jaune); } .tag.ss b { font-weight: 400; color: var(--doux); margin-left: 2px; }
-  .tag.ss.off { color: var(--doux); } .tag.ss.off b { color: var(--bleu); font-weight: 600; margin: 0; }
+  .tag.ss { color: var(--violet); }
   .tag.vert { color: var(--vert); } .tag.jaune { color: var(--jaune); } .tag.rouge { color: var(--rouge); }
   .exo .cible.decharge { color: var(--jaune); }
   /* Les lignes de séries (carte ouverte) */
@@ -369,6 +385,9 @@
   body:has(.miniplayer.actif):not(:has(.minuteur.actif)) { padding-bottom: calc(128px + env(safe-area-inset-bottom)); }
   /* Minuteur ouvert : le lecteur se pose au-dessus de lui. */
   body:has(.minuteur.actif) .miniplayer { bottom: calc(420px + env(safe-area-inset-bottom)); }
+  body:has(.minuteur.compact.actif) { padding-bottom: calc(160px + env(safe-area-inset-bottom)); }
+  body:has(.minuteur.compact.actif) .miniplayer { bottom: calc(150px + env(safe-area-inset-bottom)); }
+  body:has(.minuteur.compact.actif) #toast { bottom: calc(150px + env(safe-area-inset-bottom)); }
   .miniplayer button { border: 0; background: none; color: var(--texte); font-size: 20px; padding: 4px; line-height: 1; }
   .miniplayer .play { font-size: 24px; }
   .miniplayer .titre { flex: 1; min-width: 0; font-size: 14px; color: var(--doux); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
