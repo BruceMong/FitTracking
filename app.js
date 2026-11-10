@@ -2894,13 +2894,15 @@ function majFeuille() {
 $("#feuille").addEventListener("click", (ev) => { if (ev.target.id === "feuille") fermerFeuille(); });
 $("#feuille").addEventListener("close", () => { feuilleOuverte = null; feuilleHtml = ""; });   // Échap, retour
 
-// Le geste « retour » d'Android, dans l'APK : MainActivity appelle carnetRetour() avant toute chose. Un sous-menu
-// ouvert (feuille d'une série, menu ⋯, fiche « i », ajout d'un exercice) se referme et le geste s'arrête là (true) ;
-// sinon (false), l'appli passe en arrière-plan, comme un retour au menu des applis, sans se fermer : on la retrouve
-// sur le même écran. Dans Chrome, le retour reste celui du navigateur (historique de la vue Exercice).
+// Le geste « retour » d'Android, dans l'APK : MainActivity appelle carnetRetour() avant toute chose. Un niveau à la
+// fois, et le geste s'arrête là (true) : un sous-menu ouvert (feuille d'une série, menu ⋯, fiche « i », ajout d'un
+// exercice) se referme ; puis la vue Exercice, sous-menu de la Liste, ramène à la Liste. Sinon (false : la Liste ou
+// un autre onglet), l'appli passe en arrière-plan, comme un retour au menu des applis, sans se fermer : on la
+// retrouve sur le même écran. Dans Chrome, le retour reste celui du navigateur (historique de la vue Exercice).
 window.carnetRetour = () => {
   if (feuilleOuverte) { fermerFeuille(); return true; }
   for (const id of ["#fiche", "#ajout"]) if ($(id).open) { $(id).close(); return true; }
+  if (onglet === "seance" && grandVu) { quitterExercice(); return true; }
   return false;
 };
 

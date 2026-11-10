@@ -8,9 +8,42 @@ import { DC, avecCtx } from "./fixtures.mjs";
 const q = JSON.stringify;
 const avecCle = () => avecCtx({ "carnet:cle": "cle-de-test" });
 
-test("retour : rien d'ouvert, le carnet ne le prend pas (l'appli passe en arrière-plan)", async () => {
+test("retour : sur la Liste, rien d'ouvert, le carnet ne le prend pas (l'appli passe en arrière-plan)", async () => {
   const b = await chargerCarnet({ stockage: avecCle() });
-  b.evaluer(`dessiner(); $("#fiche").open = false; $("#ajout").open = false`);
+  b.evaluer(`allerListe(); dessiner(); $("#fiche").open = false; $("#ajout").open = false`);
+  assert.equal(b.json("grandVu"), false);
+  assert.equal(b.json("carnetRetour()"), false);
+});
+
+test("retour : de la vue Exercice (sous-menu de la Liste), on atterrit sur la Liste", async () => {
+  const b = await chargerCarnet({ stockage: avecCle() });
+  b.evaluer(`dessiner(); $("#fiche").open = false; $("#ajout").open = false; history.state = null`);
+  assert.equal(b.json("grandVu"), true);
+  assert.equal(b.json("carnetRetour()"), true);
+  assert.equal(b.json("vue"), "liste");
+  assert.equal(b.json("grandVu"), false);
+  assert.equal(b.json("carnetRetour()"), false);   // retour encore : menu des applis
+});
+
+test("retour : vue Exercice avec son entrée d'historique, la Liste vient du popstate", async () => {
+  const b = await chargerCarnet({ stockage: avecCle() });
+  b.evaluer(`dessiner(); $("#fiche").open = false; $("#ajout").open = false;
+    history.state = { exercice: 1 }; history.back = () => { history.state = null; retourHistorique(); }`);
+  assert.equal(b.json("carnetRetour()"), true);
+  assert.equal(b.json("vue"), "liste");
+});
+
+test("retour : une feuille ouverte sur la vue Exercice se referme, on reste sur l'exercice", async () => {
+  const b = await chargerCarnet({ stockage: avecCle() });
+  b.evaluer(`dessiner(); $("#fiche").open = false; $("#ajout").open = false; ouvrirFeuille(menuExo(${q(DC)}), { quoi: "menu", nom: ${q(DC)} })`);
+  assert.equal(b.json("carnetRetour()"), true);
+  assert.equal(b.json("feuilleOuverte"), null);
+  assert.equal(b.json("vue"), "exercice");
+});
+
+test("retour : sur un autre onglet, le carnet ne le prend pas", async () => {
+  const b = await chargerCarnet({ stockage: avecCle() });
+  b.evaluer(`onglet = "sante"; dessiner(); $("#fiche").open = false; $("#ajout").open = false`);
   assert.equal(b.json("carnetRetour()"), false);
 });
 
