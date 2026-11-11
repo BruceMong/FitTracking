@@ -33,8 +33,8 @@ service worker) pour noter ses séries au téléphone, à la salle, même sans r
   anglais, les muscles, trois consignes, l'erreur à éviter et le mémo de réglage. Textes dans `fiches.js`
   (clé = nom exact de `sante/sport/exercices.md`), photos de free-exercise-db (domaine public) dans
   `fiches/`, mises en cache à l'installation pour marcher sans réseau.
-- **Fiches de soin** : le « i » à côté des cases de peau de la routine du jour (soin du matin, du soir, exfoliant)
-  ouvre le geste en détail : étapes, quantités, temps, astuces, à éviter. Textes dans `fiches.js` (`SOINS`, clé = clé de
+- **Fiches de soin** : le « i » à côté des cases de peau de la routine du jour (soin du matin, du soir ; le sérum
+  A.H.A. fait partie du soin du soir, sans case à lui depuis le 2026-11-11) ouvre le geste en détail : étapes, quantités, temps, astuces, à éviter. Textes dans `fiches.js` (`SOINS`, clé = clé de
   la case envoyée par `carnet-sync`), tirés de `sante/peau/README.md`. Tant que le gel nettoyant est à acheter, l'étape 1
   dit eau tiède.
 - **Saisie en lignes** (sur le modèle d'openGym) : carte ouverte, une ligne par série, faites puis prévues,

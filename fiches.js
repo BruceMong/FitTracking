@@ -954,33 +954,23 @@ export const SOINS = {
   "soin-matin": {
     titre: "Soin du matin", duree: "2 minutes · avant de sortir",
     etapes: [
-      ["Nettoyer", "Mains propres. Mouiller le visage à l'eau tiède (pas chaude). Une noisette de gel nettoyant, la faire mousser entre les mains, masser 30 secondes en petits cercles, en insistant sur la zone T (front, nez, menton). Rincer, puis tapoter avec une serviette propre, sans frotter."],
-      ["Comedomed", "Sur peau sèche : une petite noisette, étalée en couche fine sur tout le visage, surtout la zone T. Éviter le contour des yeux et les lèvres. Il sert aussi d'hydratant. Laisser pénétrer une minute."],
-      ["SPF 50+", "En dernier : deux longueurs de doigt de crème pour le visage et le cou, sans oublier les oreilles et le haut du nez. 15 minutes avant de sortir, tous les jours, même en hiver ou par temps gris. Dehors longtemps : en remettre toutes les 2 heures."],
+      ["Nettoyer, puis rincer", "Mains propres. Mouiller le visage à l'eau tiède (pas chaude). Une noisette de gel nettoyant, la faire mousser entre les mains, masser 30 secondes en petits cercles, en insistant sur la zone T (front, nez, menton). Rincer, puis tapoter avec une serviette propre, sans frotter. C'est la seule étape qu'on rince."],
+      ["Comedomed", "Sur peau sèche : une petite noisette, étalée en couche fine sur tout le visage, surtout la zone T. Éviter le contour des yeux et les lèvres. Il sert aussi d'hydratant. Ne pas rincer : laisser pénétrer une minute."],
+      ["SPF 50+, sans rincer", "En dernier : deux longueurs de doigt de crème pour le visage et le cou, sans oublier les oreilles et le haut du nez. 15 minutes avant de sortir, tous les jours, même en hiver ou par temps gris. Dehors longtemps : en remettre toutes les 2 heures."],
     ],
     sansGel: NETTOYER_SANS_GEL,
     astuces: ["L'écran solaire n'est pas facultatif : l'exfoliant du soir rend la peau plus sensible au soleil, et les UV aggravent les marques.", "Tube de SPF ouvert depuis plus de 12 mois, ou texture changée : le racheter.", "Après le sport : refaire juste l'étape 1 et le Comedomed."],
     eviter: ["Eau chaude : elle décape, et la peau répond par plus de sébum.", "Savon ou gel douche sur le visage.", "Frotter avec la serviette."],
   },
   "soin-soir": {
-    titre: "Soin du soir", duree: "3 minutes · avant de dormir",
+    titre: "Soin du soir", duree: "3 minutes · avant de dormir · une seule case à cocher, sérum compris",
     etapes: [
-      ["Nettoyer", "Comme le matin, mais masser 60 secondes : il faut enlever l'écran solaire et le sébum de la journée. Rincer à l'eau tiède, tapoter avec une serviette propre."],
-      ["Exfoliant, les soirs où sa case est là", "Sérum A.H.A. sur peau bien sèche : voir le « i » de la case exfoliant. Les autres soirs, passer directement à l'étape 3."],
-      ["Comedomed", "Une petite noisette en couche fine sur tout le visage, en évitant les yeux et les lèvres. Si les joues tirent : un peu de crème nutritive sur les joues seulement, jamais sur la zone T."],
+      ["Nettoyer, puis rincer", "Mouiller le visage à l'eau tiède. Une noisette de gel nettoyant, la faire mousser entre les mains, masser 60 secondes (il faut enlever l'écran solaire et le sébum de la journée). Rincer à l'eau tiède, tapoter avec une serviette propre. C'est la seule étape qu'on rince."],
+      ["Sérum A.H.A., seulement si la case dit « avec sérum ce soir »", "Attendre une à deux minutes que le visage soit bien sec. 3 à 4 gouttes au bout des doigts, à tapoter sur tout le visage, surtout front, nez et menton. Éviter le contour des yeux et les lèvres. Ne pas rincer : laisser pénétrer une minute. Les soirs « sans sérum », sauter cette étape."],
+      ["Comedomed, et c'est fini", "Une petite noisette en couche fine sur tout le visage, par-dessus le sérum s'il y en a, en évitant les yeux et les lèvres. On le laisse toute la nuit : on ne rince pas, on va se coucher. Si les joues tirent : un peu de crème nutritive sur les joues seulement."],
     ],
     sansGel: NETTOYER_SANS_GEL,
-    astuces: ["Un soir sauté ne se rattrape pas : on reprend simplement le lendemain.", "Changer la taie d'oreiller chaque semaine, nettoyer l'écran du téléphone.", "Les résultats se jugent après 8 à 12 semaines : un pore met 4 à 8 semaines à se vider et se renouveler."],
-    eviter: ["Presser les points noirs avec les doigts : inflammation, cicatrice, pore élargi.", "Patchs et bandes pour le nez, gommages à grains (sucre, noyaux).", "Ajouter un autre acide, ou Rosamed, le même soir que l'exfoliant."],
-  },
-  "exfoliant": {
-    titre: "Exfoliant (sérum A.H.A.)", duree: "Le soir, après le nettoyage · 1 minute",
-    etapes: [
-      ["Peau propre et bien sèche", "Après le nettoyage, attendre une à deux minutes que le visage soit complètement sec : sur peau humide, l'acide pénètre trop et pique davantage."],
-      ["3 à 4 gouttes", "Dans le creux de la main ou au bout des doigts, puis appliquer en tapotant sur tout le visage, surtout la zone T. Éviter le contour des yeux, les lèvres et les coins du nez s'ils sont irrités."],
-      ["Laisser agir, sans rincer", "Une à deux minutes, le temps qu'il pénètre. Puis le Comedomed par-dessus, comme d'habitude."],
-    ],
-    astuces: ["Un léger picotement les premières fois est normal.", "Une petite poussée de boutons les premières semaines (« purge ») est possible : si l'irritation dure plus de deux semaines, espacer.", "Le lendemain matin, l'écran solaire est indispensable.", "Le rythme (un soir sur deux, puis tous les soirs) est calculé par le PC : la case n'apparaît que les soirs prévus."],
-    eviter: ["S'il brûle ou rougit : rincer à l'eau fraîche, mettre le Comedomed, et sauter l'exfoliant le soir suivant.", "En remettre plus de 4 gouttes pour aller plus vite.", "Le mettre sur une peau irritée, coupée ou juste rasée."],
+    astuces: ["Seul le nettoyage se rince. Le sérum et le Comedomed restent sur la peau jusqu'au lavage du lendemain matin.", "Le PC décide chaque soir s'il y a du sérum (un soir sur deux au début, puis tous les soirs) : il suffit de lire la case.", "Un léger picotement du sérum les premières fois est normal. Une petite poussée de boutons les premières semaines (« purge ») est possible.", "Un soir sauté ne se rattrape pas : on reprend simplement le lendemain."],
+    eviter: ["Si le sérum brûle ou rougit : rincer à l'eau fraîche, mettre le Comedomed, et ne pas en remettre le soir suivant.", "Plus de 4 gouttes de sérum, ou le mettre sur une peau irritée, coupée ou juste rasée.", "Presser les points noirs avec les doigts : inflammation, cicatrice, pore élargi.", "Ajouter un autre acide, ou Rosamed, le même soir que le sérum."],
   },
 };
