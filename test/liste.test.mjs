@@ -62,10 +62,10 @@ test("liste : le bas, dans l'ordre (ajouter, bilan, note, jour sans)", async () 
   assert.ok(i(/id="ajouter"/) > 0 && i(/id="ajouter"/) < i(/id="note"/));
   assert.ok(i(/id="note"/) < i(/Pas de séance aujourd'hui/));
 });
-test("liste : « Valider depuis la montre » seulement hors APK", async () => {
-  const b = await chargerCarnet({ stockage: avecCle() });
+test("liste : plus de carte « Valider depuis la montre » (retirée le 2026-11-12)", async () => {
+  const b = await chargerCarnet({ stockage: avecCle({ "carnet:montre": true }) });
   b.evaluer(`allerListe(); dessiner()`);
-  assert.match(b.evaluer(`$("#app").innerHTML`), /Valider depuis la montre/);
+  assert.doesNotMatch(b.evaluer(`$("#app").innerHTML`), /Valider depuis la montre|data-montre/);
 });
 test("liste : le type du jour porte « du jour » sous son bouton", async () => {
   const b = await chargerCarnet({ stockage: avecCle() });

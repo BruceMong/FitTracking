@@ -82,7 +82,7 @@ let grandVu = false, grandEtat = "";
 // L'ancienne préférence du grand format facultatif : la vue Exercice l'a remplacé, on la retire.
 try { localStorage.removeItem("carnet:grand"); } catch {}
 // Montre : à la fin de chaque repos, une notification « Série faite » que la montre (Garmin) relaie.
-let montre = lire("carnet:montre", false);
+const montre = false;   // carte « Valider depuis la montre » retirée le 2026-11-12 : plus de notification relayée
 // Pont de l'APK (plugin Capacitor « Montre ») : absent dans Chrome, et alors rien du pont ne tourne. pontPresente :
 // l'appli montre est ouverte (etat() puis l'événement connexion) ; pontDg : dernier geste appliqué ; pontV :
 // dernière version d'état envoyée ; pontFait : l'id de la dernière étape notée depuis le dernier plan envoyé.
@@ -621,13 +621,6 @@ function dessinerPage() {
       <div class="motifs">${MOTIFS.map((m) => `<button data-excuse="${m}" class="${ex?.tag === m ? "choisi" : ""}">${m}</button>`).join("")}</div>
       ${ex ? `<input id="excuse-texte" value="${esc(ex.texte || "")}" placeholder="Un mot (facultatif) : grippe, déplacement…">` : ""}</div>`;
   }
-  // Dans l'APK, la montre se parle en direct : ce réglage (notification relayée) ne sert qu'à Chrome.
-  if (!pont) h += `<div class="carte"><button class="case ${montre ? "faite" : ""}" data-montre><i>${montre ? "✓" : ""}</i>
-    <span><b>Valider depuis la montre</b><span class="sous">à la fin de chaque repos, une notification « Série faite » que ta montre
-    relaie : la toucher note la série prévue et lance le repos. Les répétitions se corrigent ensuite ici.</span></span></button>
-    ${montre ? `<div class="sous montre-journal">${journalMontre.length ? `Derniers échanges avec la montre :<br>${journalMontre.slice(-5).reverse()
-      .map((x) => `${new Date(x.t).toTimeString().slice(0, 8)} · ${esc(x.quoi)}`).join("<br>")}` : "Journal vide : aucune notification ni aucun appui encore."}
-      <div class="ligne2"><button data-montre-test>Tester la montre</button><button data-montre-journal>Actualiser</button></div></div>` : ""}</div>`;
   for (const x of ctx?.pause || []) h += `<p class="pause">⏸ ${esc(x.nom)} en pause : ${esc(x.raison)}</p>`;
   if (!ctx) h += `<p class="sous">Le PC n'a pas encore envoyé ton programme : il le fera à sa prochaine synchro.</p>`;
   app.innerHTML = h;
@@ -859,10 +852,7 @@ function progres() {
     h += courbeParSerie(exoGraphe, serie);
   } else h += `<div class="carte sous">Les courbes de chaque exercice apparaîtront après tes premières séances.</div>`;
 
-  // L'épaule et la course : le reste du corps est dans l'onglet Santé.
-  const douleurs = (ctx?.douleurs || []).slice();
-  for (const s of toutesSeances()) if (s.douleur != null) { const i = douleurs.findIndex((x) => x[0] === s.jour); if (i >= 0) douleurs.splice(i, 1); douleurs.push([s.jour, s.douleur]); }
-  h += courbe("Douleur à l'épaule", douleurs, { bas: 0, haut: 10, refs: [2], relier: 14, couleur: "var(--rouge)", jours: 120, legende: "sous 2 : on peut remonter" });
+  // La course : le reste du corps est dans l'onglet Santé.
   const cr = (ctx?.courses || []).map((c) => [c[0], c[2] / c[1]]);
   if (cr.length) h += courbe("Course — allure", cr, { jours: 365, relier: 30, couleur: "var(--jaune)", ajuster: true,
     fmt: (v) => `${Math.floor(v)}'${String(Math.round((v % 1) * 60)).padStart(2, "0")}`, legende: "min/km, plus bas = plus rapide" });
@@ -1045,13 +1035,6 @@ function section(id, titre, corps, replieDefaut = REPLIE_PAR_DEFAUT[id] === true
     + (ferme ? "" : typeof corps === "function" ? corps() : corps);
 }
 
-// Épaule droite : la douleur du jour règle la réintroduction des exercices en pause.
-function carteEpaule(s) {
-  const dl = s.douleur;
-  return `<div class="carte"><b>Épaule droite</b> <span class="sous">douleur aujourd'hui, de 0 à 10</span>
-    <div class="echelle">${Array.from({ length: 11 }, (_, i) => `<button data-douleur="${i}" class="${dl === i ? "choisi" : ""}"
-      style="${dl === i ? `background:${i <= 1 ? "var(--vert)" : i <= 3 ? "var(--jaune)" : "var(--rouge)"}` : ""}">${i}</button>`).join("")}</div></div>`;
-}
 function cartePoids(s) {
   const pes = ctx?.pesees?.length ? ctx.pesees[ctx.pesees.length - 1] : null;
   const vieille = !pes || (new Date(jour) - new Date(pes[0])) / 864e5 > 7;
@@ -1094,7 +1077,7 @@ function aujourdhuiSante() {
       + `</div>`;
   }
   const s = seanceDuJour();
-  return h + carteEpaule(s) + cartePoids(s) + cartePhotos();
+  return h + cartePoids(s) + cartePhotos();
 }
 
 // ───────────────────────────────────────── repas photographiés
@@ -1503,23 +1486,8 @@ document.addEventListener("click", (ev) => {
     modeCorps = t.dataset.corps; ecrire("carnet:corps", modeCorps);
   } else if (t.dataset.periode) {
     periode = Number(t.dataset.periode); ecrire("carnet:periode", periode);
-  } else if (t.hasAttribute("data-montre-test")) {
-    if (window.Notification?.permission !== "granted") { toast(`Notifications ${window.Notification?.permission === "denied" ? "refusées" : "pas encore autorisées"} pour le carnet`); Notification?.requestPermission?.(); }
-    else if (!navigator.serviceWorker?.controller) toast("Service worker pas encore actif : recharge le carnet");
-    else { navigator.serviceWorker.controller.postMessage({ test: true }); toast("Notification de test envoyée"); setTimeout(relireMontre, 800); }
-    return;
-  } else if (t.hasAttribute("data-montre-journal")) {
-    relireMontre(); return;
-  } else if (t.hasAttribute("data-montre")) {
-    montre = !montre; ecrire("carnet:montre", montre);
-    if (montre && window.Notification?.permission === "default") Notification.requestPermission();
-    toast(montre ? "Montre : la notification de fin de repos portera « Série faite »" : "Montre : désactivée");
-    prevenirSW();
   } else if (t.dataset.replie) {
     basculerReplie(t.dataset.replie);
-  } else if (t.dataset.douleur != null) {
-    const v = Number(t.dataset.douleur);
-    s.douleur = s.douleur === v ? null : v; sauver();
   } else if (t.hasAttribute("data-poids-ok")) {
     const v = parseFloat(($("#poids").value || "").replace(",", "."));
     if (v > 30 && v < 250) { s.poids = v; sauver(); } else { s.poids = null; sauver(); }

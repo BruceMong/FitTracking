@@ -18,7 +18,7 @@ service worker) pour noter ses séries au téléphone, à la salle, même sans r
   « contexte » : séance du jour selon la rotation push / pull / legs, dernière fois et cible de
   chaque exercice (double progression), conseil d'intensité tiré de la montre.
 
-- **Santé** (en sections repliables : Aujourd'hui avec le ressenti, la douleur à l'épaule, le poids, les photos et le repas, puis rapport, objectifs et courbes, repliées par défaut) : les données de la montre et les calculs du panneau Santé du PC — alertes, dernière nuit
+- **Santé** (en sections repliables : Aujourd'hui avec le ressenti, le poids, les photos et le repas (la carte épaule droite est retirée depuis le 2026-11-12, guérie), puis rapport, objectifs et courbes, repliées par défaut) : les données de la montre et les calculs du panneau Santé du PC — alertes, dernière nuit
   (durée, horaires, phases, score), VFC, FC au repos, Body Battery, stress, SpO2, respiration, semaine en
   cours (pas, séances, minutes intensives), dette et régularité du sommeil, ressenti noté, objectifs, et
   les courbes sur 30 ou 90 jours (poids, sommeil, VFC, FC, Body Battery, stress, pas, coucher).
@@ -77,7 +77,7 @@ service worker) pour noter ses séries au téléphone, à la salle, même sans r
   l'équilibre tirer / pousser sur 4 semaines (posture, épaule droite).
 - **Progrès** : calendrier des séances sur 26 semaines et série de semaines tenues (3 séances, un jour excusé compte),
   séries par semaine, courbes de chaque exercice (1RM estimé, charge, et série par série : une ligne par numéro de série,
-  pour voir celle où l'on décroche), douleur à l'épaule, allure de course. Silhouette en trois modes : volume,
+  pour voir celle où l'on décroche), allure de course (la courbe de douleur à l'épaule est retirée depuis le 2026-11-12). Silhouette en trois modes : volume,
   récupération, muscles négligés (jours depuis la dernière série). Santé : le poids en moyenne par semaine.
 - Les courbes sont en SVG écrit à la main, sans bibliothèque, pour marcher hors ligne.
 - **Vue Exercice** (vue d'ouverture de la Séance ; c'était le « grand format » facultatif du 2026-11-06) : tout le menu de série en plein écran, pour le lire et le toucher dans
@@ -89,7 +89,7 @@ service worker) pour noter ses séries au téléphone, à la salle, même sans r
   l'exercice, et ‹ › en choisit un autre si la machine est prise. Une série
   notée ici est une série comme une autre. Les tailles suivent la fenêtre, et les paliers de hauteur (620, 430, 340, 300, 240 px)
   retirent le secondaire. Tester : jamais sur le port 9333 (ZapZap) ni 9222 (Chrome de Bruce).
-- **Montre** (réglage « Valider depuis la montre », onglet Séance, depuis le 2026-11-07) : à la fin de chaque repos, la
+- **Montre** (**retiré le 2026-11-12** : la carte « Valider depuis la montre » n'existe plus et la notification relayée est coupée, `montre = false` ; l'appli montre ci-dessous la remplace. Ce qui suit décrit l'ancien réglage, onglet Séance, depuis le 2026-11-07) : à la fin de chaque repos, la
   notification devient « Go · exercice », la série prévue et un bouton **Série faite**, envoyée même carnet à l'écran. La
   montre (Garmin, Android) la relaie ; le bouton passe par le service worker (`notificationclick`), qui prévient la page
   (`depuisMontre`) ou la rouvre (`#montre=`). Une série déjà notée au téléphone n'est pas notée deux fois (`idSerie`). En

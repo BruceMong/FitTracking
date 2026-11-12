@@ -21,10 +21,11 @@ test("santé : sections dans l'ordre, courbes repliées par défaut", async () =
   assert.deepEqual(ids, ["aujourdhui", "rapport", "nuit", "courbes", "objectifs"]);
   assert.doesNotMatch(h, /class="carte graphe"/);
 });
-test("santé : épaule, poids et photos dans Aujourd'hui", async () => {
+test("santé : poids et photos dans Aujourd'hui, plus de carte épaule (guérie, 2026-11-12)", async () => {
   const b = await chargerCarnet({ stockage: avecSante() });
   const h = b.json("sante()");
-  for (const t of ["Épaule droite", "<b>Poids</b>", "Photos de suivi"]) assert.match(h, new RegExp(t));
+  for (const t of ["<b>Poids</b>", "Photos de suivi"]) assert.match(h, new RegExp(t));
+  assert.doesNotMatch(h, /Épaule droite|data-douleur/);
 });
 test("santé : une section dépliée le reste", async () => {
   const b = await chargerCarnet({ stockage: avecSante() });
@@ -40,13 +41,11 @@ test("santé : une section ouverte se replie, et le tableau du rapport est repli
   b.evaluer(`basculerReplie("aujourdhui")`);
   const h = b.json("sante()");
   assert.equal(b.stockage()["carnet:replie"].aujourdhui, true);
-  assert.doesNotMatch(h, /data-douleur/);
+  assert.doesNotMatch(h, /data-poids-ok/);
 });
-test("santé : la douleur et le poids se notent depuis l'onglet", async () => {
+test("santé : le poids se note depuis l'onglet", async () => {
   const b = await chargerCarnet({ stockage: avecSante({ "carnet:cle": "cle-essai" }) });
   b.evaluer(`onglet = "sante"; dessiner()`);
-  b.clic({ douleur: "3" });
-  assert.equal(b.json("seanceDuJour().douleur"), 3);
   b.evaluer(`document.querySelector("#poids").value = "78,4"`);
   b.clic({}, ["data-poids-ok"]);
   assert.equal(b.json("seanceDuJour().poids"), 78.4);
