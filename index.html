@@ -17,11 +17,11 @@
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
   html, body { margin: 0; background: var(--bg); color: var(--texte);
     font: 16px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
-  body { padding: env(safe-area-inset-top) 16px calc(96px + env(safe-area-inset-bottom)); }
+  body { padding: env(safe-area-inset-top) 16px calc(76px + env(safe-area-inset-bottom)); }
   /* Minuteur ouvert : assez de place sous la page pour faire défiler la saisie au-dessus de lui. */
-  body:has(.minuteur.actif) { padding-bottom: calc(350px + env(safe-area-inset-bottom)); }
+  body:has(.minuteur.actif) { padding-bottom: calc(410px + env(safe-area-inset-bottom)); }
   header { display: flex; align-items: baseline; justify-content: space-between; padding: 14px 0 6px; }
-  h1 { font-size: 26px; margin: 0; }
+  h1 { font-size: 22px; margin: 0; }
   .etat { font-size: 13px; color: var(--doux); }
   .etat.ok { color: var(--vert); } .etat.attente { color: var(--jaune); } .etat.erreur { color: var(--rouge); }
   .sous { color: var(--doux); font-size: 14px; }
@@ -30,13 +30,19 @@
   .conseil.repos b { color: var(--rouge); } .conseil.leger b { color: var(--jaune); }
   .conseil.intense b, .conseil.modere b { color: var(--vert); }
   .types { display: flex; gap: 8px; margin: 12px 0 4px; overflow-x: auto; }
-  .types button { flex: 1; padding: 10px 0; border-radius: 10px; border: 0; background: var(--carte2);
+  .types .type { flex: 1; display: flex; flex-direction: column; align-items: stretch; gap: 3px; }
+  .types button { min-height: 44px; padding: 10px 0; border-radius: 10px; border: 0; background: var(--carte2);
     color: var(--texte); font-size: 15px; text-transform: capitalize; }
+  /* Le type que la rotation propose aujourd'hui : un petit libellé sous son bouton. */
+  .type-du-jour { text-align: center; font-size: 11px; color: var(--doux); line-height: 1; }
   .types button.choisi { background: var(--bleu); font-weight: 600; }
   .exo h3 { margin: 0; font-size: 17px; display: flex; justify-content: space-between; gap: 8px; }
   .exo h3 .n { color: var(--doux); font-weight: 400; font-size: 14px; white-space: nowrap; }
   .exo.fait h3 { color: var(--vert); }
-  .exo .cible { color: var(--bleu); font-size: 14px; margin-top: 2px; }
+  /* La carte entière ouvre la vue Exercice. */
+  .carte.exo { cursor: pointer; }
+  .carte.exo:active { background: var(--carte2); }
+  .exo .cible { color: var(--texte); font-size: 14px; margin-top: 2px; }
   .exo .cible.monte { color: var(--vert); }
   .series { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
   .serie { background: var(--carte2); border-radius: 8px; padding: 5px 10px; font-variant-numeric: tabular-nums;
@@ -60,10 +66,21 @@
   .pause { color: var(--doux); font-size: 14px; }
   .alerte { color: var(--jaune); }
   /* Minuteur de repos (« .repos » est déjà pris par le conseil du jour : renommé). */
-  .minuteur { position: fixed; left: 12px; right: 12px; bottom: calc(12px + env(safe-area-inset-bottom));
+  .minuteur { position: fixed; left: 12px; right: 12px; bottom: calc(68px + env(safe-area-inset-bottom));
     background: var(--carte2); border-radius: 18px; padding: 12px 14px 14px; display: none;
     box-shadow: 0 8px 30px rgba(0,0,0,.7); }
   .minuteur.actif { display: block; }
+  /* Vue Liste : le repos tient sur une ligne (exercice · chrono · Passer), la jauge en filet dessous. */
+  .minuteur.compact { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: 0 12px;
+    padding: 8px 8px 8px 14px; border-radius: 14px; }
+  .minuteur.compact .quoi { font-size: 15px; color: var(--texte); }
+  .minuteur.compact .haut { display: block; }
+  .minuteur.compact .chrono { font-size: 28px; }
+  .minuteur.compact #min-cible, .minuteur.compact .effort { display: none; }
+  .minuteur.compact .jauge { grid-column: 1 / -1; grid-row: 2; height: 3px; margin: 6px 6px 0 0; }
+  .minuteur.compact .boutons { display: block; grid-column: 3; grid-row: 1; }
+  .minuteur.compact .boutons button { display: none; }
+  .minuteur.compact .boutons button[data-min="stop"] { display: block; min-width: 84px; }
   .minuteur .quoi { font-size: 13px; color: var(--doux); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .minuteur .haut { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
   .minuteur .chrono { font-size: 40px; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1.1; }
@@ -86,6 +103,13 @@
   dialog input { width: 100%; height: 44px; border-radius: 10px; border: 1px solid var(--ligne);
     background: var(--bg); color: var(--texte); font-size: 16px; padding: 0 10px; }
   .choix { max-height: 50vh; overflow-y: auto; margin-top: 8px; }
+  /* Le dialogue d'ajout : une colonne, intertitres par muscle, défilement interne (la grille .choix plus bas ne le concerne pas). */
+  #ajout { max-height: 85vh; }
+  #choix { display: block; max-height: calc(85vh - 140px); overflow-x: hidden; overflow-y: auto; }
+  #choix button { display: block; width: 100%; min-height: 48px; text-align: left; background: none; border: 0; border-radius: 0;
+    border-bottom: 1px solid var(--ligne); color: var(--texte); padding: 12px 4px; font-size: 16px; }
+  .choix-groupe { position: sticky; top: 0; background: var(--carte); color: var(--doux); font-size: 13px; text-transform: uppercase;
+    letter-spacing: .04em; padding: 10px 4px 4px; }
   .choix button { display: block; width: 100%; text-align: left; background: none; border: 0;
     border-bottom: 1px solid var(--ligne); color: var(--texte); padding: 12px 4px; font-size: 16px; }
   .choix button span { color: var(--doux); font-size: 13px; }
@@ -94,12 +118,19 @@
     background: var(--carte); color: var(--texte); border: 1px solid var(--ligne); border-radius: 10px; }
   .accueil button { padding: 12px 18px; font-size: 16px; border-radius: 10px; border: 0; background: var(--texte); color: var(--carte); }
   .accueil .erreur { color: #e5484d; }
-  .onglets { display: flex; gap: 6px; background: var(--carte); border-radius: 12px; padding: 4px; margin: 4px 0 8px; }
-  .onglets button { flex: 1; border: 0; background: none; color: var(--doux); padding: 8px 0; border-radius: 9px; font-size: 15px; }
-  .onglets button.choisi { background: var(--carte2); color: var(--texte); font-weight: 600; }
-  .echelle { display: grid; grid-template-columns: repeat(11, 1fr); gap: 4px; margin-top: 8px; }
-  .echelle button { height: 38px; border: 0; border-radius: 8px; background: var(--carte2); color: var(--texte); font-size: 15px; padding: 0; }
+  /* Barre d'onglets fixée en bas : sous le pouce, au-dessus du geste système. */
+  .onglets { position: fixed; left: 0; right: 0; bottom: 0; z-index: 30; display: flex; background: var(--bg);
+    border-top: 1px solid var(--ligne); padding-bottom: env(safe-area-inset-bottom); }
+  .onglets button { flex: 1; height: 56px; border: 0; background: none; color: var(--doux); font-size: 15px; touch-action: manipulation; }
+  .onglets button.choisi { color: var(--bleu); font-weight: 600; }
+  /* Douleur 0 à 10 : deux lignes de six, pour des boutons de 44 px au moins. */
+  .echelle { display: grid; grid-template-columns: repeat(6, 1fr); gap: 6px; margin-top: 8px; }
+  .echelle button { height: 48px; border: 0; border-radius: 8px; background: var(--carte2); color: var(--texte); font-size: 15px; padding: 0; }
   .echelle button.choisi { color: #000; font-weight: 700; }
+  /* Intertitre de section repliable (Santé) : une ligne à toucher, chevron à droite. */
+  .section-tete { display: flex; justify-content: space-between; align-items: center; width: 100%; min-height: 48px; margin-top: 8px;
+    padding: 0 4px; border: 0; background: none; color: var(--texte); font-size: 18px; font-weight: 700; text-align: left; }
+  .section-tete .chevron { font-style: normal; color: var(--doux); font-size: 16px; }
   .ligne2 { display: flex; gap: 8px; align-items: center; margin-top: 8px; }
   .ligne2 input { flex: 1; height: 44px; border-radius: 10px; border: 1px solid var(--ligne); background: var(--bg);
     color: var(--texte); font-size: 18px; padding: 0 10px; }
@@ -175,8 +206,10 @@
   #fiche ol.f-etapes b { display: block; }
   /* Fiche d'exercice : le « i » à côté du nom, la bulle qui s'ouvre */
   .exo h3 .nom { display: flex; align-items: center; gap: 8px; min-width: 0; }
-  .info { flex: none; width: 22px; height: 22px; border-radius: 50%; border: 1px solid var(--doux); background: none;
+  /* Le rond visible reste à 22 px ; la zone tactile fait 44 px (le pseudo-élément déborde sans bouger la mise en page). */
+  .info { flex: none; position: relative; width: 22px; height: 22px; border-radius: 50%; border: 1px solid var(--doux); background: none;
     color: var(--doux); font: italic 600 13px/1 Georgia, serif; padding: 0; }
+  .info::after { content: ""; position: absolute; left: 50%; top: 50%; width: 44px; height: 44px; transform: translate(-50%, -50%); }
   #fiche { padding: 12px; }
   /* Séance : avancement, récupération, étiquettes, séries prévues, réserve */
   .avance { margin: 10px 0 2px; }
@@ -184,8 +217,7 @@
   .tags { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 6px; }
   .tag { font-size: 12px; padding: 2px 8px; border-radius: 999px; background: var(--carte2); color: var(--doux); }
   button.tag { border: 0; font: inherit; font-size: 12px; line-height: inherit; }
-  .tag.ss { color: var(--jaune); } .tag.ss b { font-weight: 400; color: var(--doux); margin-left: 2px; }
-  .tag.ss.off { color: var(--doux); } .tag.ss.off b { color: var(--bleu); font-weight: 600; margin: 0; }
+  .tag.ss { color: var(--violet); }
   .tag.vert { color: var(--vert); } .tag.jaune { color: var(--jaune); } .tag.rouge { color: var(--rouge); }
   .exo .cible.decharge { color: var(--jaune); }
   /* Les lignes de séries (carte ouverte) */
@@ -305,7 +337,38 @@
   #flash { position: fixed; inset: 0; background: var(--vert); opacity: 0; pointer-events: none; z-index: 50; }
   #flash.on { animation: flash .45s ease-in-out 3; }
   @keyframes flash { 50% { opacity: .5; } }
-  #toast { position: fixed; left: 12px; right: 12px; bottom: calc(150px + env(safe-area-inset-bottom)); background: var(--texte); color: #000;
+  /* Feuilles du bas (pastilles, menu ⋯) : collées en bas, pleine largeur ; le fond touché les ferme. */
+  dialog.feuille { margin: auto 0 0 0; width: 100%; max-width: none; max-height: 85vh; padding: 0; overflow-y: auto;
+    border-radius: 18px 18px 0 0; background: var(--carte); }
+  dialog.feuille::backdrop { background: rgba(0,0,0,.6); }
+  #feuille-corps { padding: 18px 16px calc(12px + env(safe-area-inset-bottom)); }
+  #feuille-corps::before { content: ""; display: block; width: 40px; height: 4px; border-radius: 2px; background: var(--repos);
+    margin: -10px auto 12px; }
+  .f-tete { display: flex; flex-direction: column; gap: 2px; padding-bottom: 8px; }
+  .f-tete b { font-size: 19px; } .f-tete span { color: var(--doux); font-size: 14px; }
+  .f-ligne { display: flex; align-items: center; justify-content: space-between; width: 100%; height: 52px; padding: 0 4px;
+    background: none; border: 0; border-top: 1px solid var(--ligne); color: var(--texte); font-size: 17px; text-align: left; }
+  .f-ligne.danger { color: var(--rouge); }
+  .f-case { width: 24px; height: 24px; border-radius: 7px; border: 2px solid var(--doux); display: grid; place-items: center;
+    font-size: 15px; font-weight: 700; color: #fff; }
+  .f-case.on { background: var(--bleu); border-color: var(--bleu); }
+  #feuille-corps .f-ls { display: block; padding: 0; background: none; border: 0; min-height: 0; }
+  .f-reglage { padding: 6px 0 10px; } .f-lib { display: block; color: var(--doux); font-size: 13px; margin-bottom: 6px; }
+  .f-pm { display: grid; grid-template-columns: 64px minmax(0, 1fr) 64px; gap: 10px; align-items: center; }
+  .f-pm button { height: 60px; border: 0; border-radius: 14px; background: var(--carte2); color: var(--texte); font-size: 30px; }
+  .f-val { text-align: center; } .f-val small { color: var(--doux); margin-left: 4px; font-size: 14px; }
+  /* La valeur se tape : un champ qui a l'air du chiffre (« pdc » en clair quand la charge est vide). */
+  #feuille .f-val input { width: 3.4ch; height: auto; padding: 2px 0; border: 0; border-radius: 8px; background: none; color: var(--texte);
+    font: inherit; font-size: 30px; font-weight: 700; font-variant-numeric: tabular-nums; text-align: center; }
+  @supports (field-sizing: content) { #feuille .f-val input { field-sizing: content; width: auto; min-width: 1.2ch; max-width: 6ch; } }
+  .f-val input::placeholder, .g-val input::placeholder { color: inherit; opacity: .6; }
+  .f-val input:focus, .g-val input:focus { outline: 2px solid var(--bleu); outline-offset: 2px; }
+  .f-reserve { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; }
+  .f-reserve button { height: 48px; border: 0; border-radius: 12px; background: var(--carte2); color: var(--texte); font-size: 18px; }
+  .f-reserve button.choisi { background: var(--bleu); font-weight: 700; }
+  .f-champ { display: flex; gap: 8px; padding-top: 6px; } .f-champ input { flex: 1; min-width: 0; }
+  .f-ok { height: 44px; padding: 0 18px; border: 0; border-radius: 10px; background: var(--bleu); color: #fff; font-size: 16px; font-weight: 600; }
+  #toast { position: fixed; left: 12px; right: 12px; bottom: calc(206px + env(safe-area-inset-bottom)); background: var(--texte); color: #000;
     border-radius: 12px; padding: 10px 14px; display: none; align-items: center; justify-content: space-between; gap: 10px; z-index: 40; font-size: 15px; }
   #toast.vu { display: flex; }
   #toast button { border: 0; background: none; color: var(--bleu); font-weight: 700; font-size: 15px; padding: 6px 0; }
@@ -333,9 +396,15 @@
   #fiche ol { margin: 10px 0 6px; padding-left: 20px; font-size: 15px; }
   #fiche ol li { margin-bottom: 4px; }
   /* Lecteur de musique (mp3 privés, dans le navigateur) */
-  .miniplayer { display: none; position: sticky; top: 0; z-index: 6; align-items: center; gap: 8px;
-    background: var(--carte); border-radius: 12px; padding: 6px 10px; margin: 0 0 8px; }
+  .miniplayer { display: none; position: fixed; left: 16px; right: 16px; bottom: calc(64px + env(safe-area-inset-bottom)); z-index: 29; align-items: center; gap: 8px;
+    background: var(--carte2); border-radius: 12px; padding: 6px 10px; box-shadow: 0 4px 16px rgba(0,0,0,.6); }
   .miniplayer.actif { display: flex; }
+  body:has(.miniplayer.actif):not(:has(.minuteur.actif)) { padding-bottom: calc(128px + env(safe-area-inset-bottom)); }
+  /* Minuteur ouvert : le lecteur se pose au-dessus de lui. */
+  body:has(.minuteur.actif) .miniplayer { bottom: calc(420px + env(safe-area-inset-bottom)); }
+  body:has(.minuteur.compact.actif) { padding-bottom: calc(160px + env(safe-area-inset-bottom)); }
+  body:has(.minuteur.compact.actif) .miniplayer { bottom: calc(150px + env(safe-area-inset-bottom)); }
+  body:has(.minuteur.compact.actif) #toast { bottom: calc(150px + env(safe-area-inset-bottom)); }
   .miniplayer button { border: 0; background: none; color: var(--texte); font-size: 20px; padding: 4px; line-height: 1; }
   .miniplayer .play { font-size: 24px; }
   .miniplayer .titre { flex: 1; min-width: 0; font-size: 14px; color: var(--doux); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -371,16 +440,14 @@
   .rapport .rp-dates { flex-wrap: wrap; margin-top: 4px; }
   .rapport .rp-dates button { flex: 0 0 auto; padding: 6px 12px; background: var(--bg); }
   .rapport .rp-dates button.choisi { background: var(--carte2); }
-  /* Le grand format : tout le menu de série en plein écran, pensé pour une fenêtre réduite. Les tailles
-     suivent la fenêtre (vw, vh), et plus elle est petite, plus il ne reste que l'essentiel. */
-  .minuteur .quoi { padding-right: 40px; }
-  .minuteur .min-grand { position: absolute; top: 6px; right: 6px; width: 40px; height: 40px; padding: 0;
-    display: grid; place-items: center; background: var(--carte); color: var(--texte); }
   .montre-journal { margin: 8px 0 0 34px; font-size: 12px; line-height: 1.6; font-variant-numeric: tabular-nums; }
-  .grand-lien { display: inline-flex; align-items: center; gap: 6px; color: var(--bleu); margin-top: 6px; }
-  .grand-lien svg { width: 15px; height: 15px; }
+  /* La vue Exercice : toute la page au-dessus de la barre d'onglets, qui reste visible et touchable. Pensée aussi
+     pour une fenêtre réduite : les tailles suivent la fenêtre (vw, vh), et plus elle est petite, plus il ne reste
+     que l'essentiel. */
   body:has(#grand.ouvert) { overflow: hidden; }
-  #grand { display: none; position: fixed; inset: 0; z-index: 45; background: #000; color: var(--texte); overflow: hidden; }
+  #grand { display: none; position: fixed; top: 0; left: 0; right: 0; bottom: calc(57px + env(safe-area-inset-bottom)); z-index: 35;
+    background: #000; color: var(--texte); overflow: hidden; padding: 0; border: 0; border-radius: 0; font-size: 16px; }
+  /* (padding, bordure, coins et taille : les classes d'état « serie » et « pause » sont aussi celles des puces et des pauses.) */
   #grand.ouvert { display: block; animation: g-entree .16s ease-out; }
   @keyframes g-entree { from { opacity: 0; transform: scale(.98); } }
   /* Toute la fenêtre est la jauge : elle monte du bas pendant le repos. */
@@ -390,14 +457,40 @@
   #grand.pause #g-niveau { background: rgba(255, 214, 10, .16); }
   #grand.fini #g-niveau { display: none; }
   #g-corps { position: relative; height: 100%; box-sizing: border-box; display: flex; flex-direction: column; gap: clamp(6px, 1.6vh, 14px);
-    padding: calc(clamp(8px, 2vh, 16px) + env(safe-area-inset-top)) clamp(8px, 3vw, 16px) calc(clamp(8px, 2vh, 16px) + env(safe-area-inset-bottom)); }
+    padding: calc(clamp(8px, 2vh, 16px) + env(safe-area-inset-top)) clamp(8px, 3vw, 16px) clamp(8px, 2vh, 16px); }
   .g-tete { display: flex; align-items: center; gap: 6px; min-height: 44px; }
   .g-titre { flex: 1; min-width: 0; }
   .g-titre b { display: block; font-size: clamp(15px, 5vw, 22px); line-height: 1.2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .g-titre span { display: block; font-size: clamp(12px, 3.6vw, 15px); opacity: .72; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  /* En série, l'en-tête porte aussi ‹ ›, ☰ et ⋯ : le nom et sa ligne passent sur deux lignes au besoin. */
+  .g-tete:has([data-g=menu]) .g-titre b { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; font-size: clamp(15px, 4.6vw, 20px); }
+  .g-tete:has([data-g=menu]) .g-titre span { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
   #grand button { font: inherit; color: inherit; border-radius: 14px; border: 1px solid rgba(255, 255, 255, .22); background: rgba(0, 0, 0, .5); touch-action: manipulation; }
   #grand button:active { transform: scale(.97); }
-  #grand .g-reduire, #grand .g-fleche { flex: none; width: 44px; height: 44px; padding: 0; display: grid; place-items: center; font-size: 26px; line-height: 1; }
+  #grand .g-fleche, #grand .g-outils button { flex: none; width: 44px; height: 44px; padding: 0; display: grid; place-items: center; font-size: 26px; line-height: 1; }
+  .g-outils { flex: none; display: flex; gap: 6px; margin-left: 4px; }
+  #grand .g-outils button { font-size: 22px; }
+  /* Sous l'en-tête : la dernière fois, la cible (information, pas un lien : pas de bleu), le record, le mémo. */
+  .g-infos { display: flex; flex-direction: column; gap: 2px; font-size: clamp(13px, 3.8vw, 15px); line-height: 1.35; opacity: .8;
+    flex: 0 1 auto; min-height: 0; overflow: hidden; }
+  /* Le réglage passe avant les infos : faute de place, ce sont elles qui rétrécissent (lignes coupées), jamais les
+     − / + qui débordent sur « Série faite » (un appui sur leur bas validerait une série). */
+  .g-milieu:has(> .g-ligne) { flex-shrink: 0; min-height: auto; }
+  .g-pastilles { flex-shrink: 0; }
+  .g-infos > div { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .g-info { color: #f2f2f7; opacity: 1; }
+  .g-info.decharge { color: var(--jaune); }
+  /* Une pastille par série : faite (vert), prochaine (entourée), prévue (pointillés). */
+  .g-pastilles { display: flex; flex-wrap: wrap; gap: 6px; }
+  #grand .g-pastilles button { min-height: 44px; min-width: 56px; padding: 0 10px; border-radius: 12px; font-size: clamp(14px, 4vw, 16px);
+    font-variant-numeric: tabular-nums; }
+  #grand .g-pastilles button.fait { background: var(--vert); border-color: var(--vert); color: #04130a; font-weight: 700; }
+  #grand .g-pastilles button.prochaine { border: 2px solid #fff; font-weight: 700; }
+  #grand .g-pastilles button.prevue { border-style: dashed; opacity: .75; }
+  /* Pendant le repos : une seule ligne qui défile, pour que le chrono reste le plus grand. */
+  .g-pastilles.compact { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
+  #grand .g-pastilles.compact button { flex: none; min-height: 44px; min-width: 52px; font-size: 14px; }
+  #grand .g-pastilles small { margin-left: 3px; font-size: 12px; opacity: .8; color: inherit; }
   .g-milieu { flex: 1; min-height: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: clamp(4px, 1.4vh, 12px); text-align: center; }
   .g-chrono { font-size: min(34vw, 32vh); font-weight: 800; line-height: .95; letter-spacing: -.03em; font-variant-numeric: tabular-nums; }
   #grand.fini .g-chrono { font-size: min(27vw, 30vh); }   /* « +0:12 » a un caractère de plus */
@@ -419,20 +512,21 @@
   /* La ligne de réglage : mêmes gestes que dans la carte, mais à l'échelle du pouce. */
   #grand .g-ligne { display: flex; flex-wrap: wrap; justify-content: center; gap: clamp(6px, 1.6vh, 12px); width: 100%; min-height: 0; padding: 0; background: none; border: 0; }
   .g-pm { flex: 1 1 200px; display: grid; grid-template-columns: minmax(44px, 1fr) minmax(0, 1.2fr) minmax(44px, 1fr); align-items: center; gap: 6px; }
-  #grand .g-pm button { height: clamp(52px, 12vh, 92px); padding: 0; font-size: clamp(26px, 8vw, 40px); line-height: 1; }
+  #grand .g-pm button { height: clamp(56px, 12vh, 92px); padding: 0; font-size: clamp(26px, 8vw, 40px); line-height: 1; }
   .g-val { text-align: center; line-height: 1; }
-  .g-val b { display: block; font-size: clamp(26px, 10vw, 52px); font-weight: 800; font-variant-numeric: tabular-nums; }
+  .g-val input { display: block; box-sizing: border-box; width: 100%; min-width: 0; height: auto; margin: 0; padding: 0; border: 0; border-radius: 10px;
+    background: none; color: inherit; font: inherit; font-size: clamp(26px, 10vw, 52px); font-weight: 800; line-height: 1.05;
+    font-variant-numeric: tabular-nums; text-align: center; }
   .g-val small { font-size: clamp(11px, 3.4vw, 14px); opacity: .7; }
   .g-milieu .g-ligne { flex-direction: column; flex-wrap: nowrap; }
   .g-milieu .g-pm { flex: none; width: 100%; max-width: 460px; margin: 0 auto; }
-  .g-faites { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px; font-size: clamp(13px, 3.8vw, 15px); opacity: .8; }
-  .g-faites span { padding: 3px 9px; border-radius: 999px; background: rgba(255, 255, 255, .1); }
-  .g-faites small { margin-left: 3px; opacity: .75; }
   .g-actions { display: flex; gap: 6px; }
   .g-actions > * { flex: 1; min-width: 0; }
   .g-quatre .g-second, .g-trois .g-second { height: clamp(48px, 9vh, 68px); font-size: clamp(14px, 4.2vw, 18px); padding: 0 4px; white-space: nowrap; }
   #grand .g-principal { flex: 2; min-height: clamp(60px, 15vh, 120px); padding: 0 8px; background: var(--vert); border-color: var(--vert); color: #04130a; font-size: clamp(21px, 7.5vw, 36px); font-weight: 800; }
   #grand .g-second { height: clamp(48px, 9vh, 68px); }
+  /* Exercice fini : « Exercice suivant › » à la hauteur de « + une série ». */
+  #grand .g-actions:has([data-g=une-de-plus]) .g-second { height: auto; align-self: stretch; min-height: 48px; }
   #grand .g-trois .g-principal { flex: 1.3; }
   #grand .g-trois .g-second { white-space: normal; line-height: 1.1; align-self: stretch; height: auto; min-height: 48px; }
   #grand .g-go { min-height: clamp(64px, 20vh, 150px); background: #fff; border-color: #fff; color: #000; font-size: clamp(28px, 11vw, 60px); font-weight: 800; }
@@ -447,33 +541,37 @@
   }
   /* Fenêtre courte : une chose à la fois, la question de la réserve d'abord. */
   @media (max-height: 620px) {
+    /* Les pastilles sur une ligne, qui défile sous le doigt ; la prochaine est amenée à l'écran (majGrand). */
+    .g-pastilles { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
+    #grand .g-pastilles button { flex: none; }
     #grand .g-zone.question .g-ligne { display: none; }
     .g-zone:not(.question) .g-reserve { display: none; }
   }
   @media (max-height: 430px) {
-    .g-faites, .g-reserve span, .g-reserve small, .g-val small, #grand .g-lien { display: none; }
+    .g-reserve span, .g-reserve small, .g-val small, #grand .g-lien, .g-record, .g-memo, .g-ensuite { display: none; }   /* « Ensuite » : coupé à mi-ligne par la réserve à cette hauteur */
     .g-titre span { font-size: 12px; }
     #grand .g-ajuste { display: none; }
     .g-tete { min-height: 40px; }
-    #grand .g-reduire, #grand .g-fleche { width: 40px; height: 40px; }
-    #grand .g-pm button { height: 48px; }
+    #grand .g-pm button { height: 56px; }
     .g-chrono { font-size: min(34vw, 30vh); }
   }
   @media (max-height: 430px) and (min-width: 380px) {
     #grand .g-milieu .g-ligne { flex-direction: row; }
     .g-milieu .g-pm { flex: 1 1 0; }
+    .g-pm { grid-template-columns: 56px minmax(0, 1fr) 56px; }   /* − / + de 56 px au moins, en largeur aussi */
+    .g-val input { font-size: clamp(20px, 6vw, 28px); }   /* « pdc » ou « 42,5 » tient entre ses − / + */
   }
   @media (max-height: 340px) {
     #g-corps:has(.g-zone.question) .g-milieu .g-ligne { display: none; }   /* superset : la réserve d'abord */
   }
   @media (max-height: 300px) {
-    .g-ensuite, .g-titre span { display: none; }
+    .g-ensuite, .g-titre span, .g-infos, .g-pastilles { display: none; }
     .g-titre b { font-size: 14px; }
     .g-zone:not(.question) { display: none; }
     #grand .g-reserve button { height: 44px; }
     #grand .g-principal, #grand .g-go { min-height: 54px; }
     .g-quatre .g-second { height: 44px; }
-    .g-val b { font-size: 24px; }
+    .g-val input { font-size: 24px; }
   }
   /* Timbre-poste : on règle les répétitions, la charge reste celle d'avant. */
   @media (max-height: 240px) {
@@ -501,7 +599,6 @@
   <h1 id="titre">FitTracking</h1>
   <span id="etat" class="etat"></span>
 </header>
-<div class="onglets"><button data-onglet="seance" class="choisi">Séance</button><button data-onglet="sante">Santé</button><button data-onglet="progres">Progrès</button><button data-onglet="musique">Musique</button></div>
 <div class="miniplayer" id="miniplayer"></div>
 <main id="app"></main>
 <div id="version" class="version"></div>
@@ -509,7 +606,6 @@
 <input type="file" id="fichier-musique" accept="audio/*,.mp3" multiple hidden>
 <audio id="audio" preload="none"></audio>
 <div class="minuteur" id="minuteur">
-  <button class="min-grand" data-min="grand" aria-label="Agrandir : grand format"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 3H3v6M15 3h6v6M9 21H3v-6M15 21h6v-6"/></svg></button>
   <div class="quoi" id="min-quoi"></div>
   <div class="haut"><div class="chrono" id="chrono">1:30</div><div class="sous" id="min-cible"></div></div>
   <div class="jauge"><i id="min-jauge"></i></div>
@@ -523,12 +619,14 @@
   <button class="lien" id="fermer-ajout">Annuler</button>
 </dialog>
 <div id="grand"><i id="g-niveau"></i><div id="g-corps"></div></div>
+<dialog id="feuille" class="feuille"><div id="feuille-corps"></div></dialog>
 <div id="flash"></div>
 <div id="toast" role="status"></div>
 <dialog id="fiche">
   <div id="fiche-contenu"></div>
   <button class="lien" id="fermer-fiche">Fermer</button>
 </dialog>
+<div class="onglets"><button data-onglet="seance" class="choisi">Séance</button><button data-onglet="sante">Santé</button><button data-onglet="progres">Progrès</button><button data-onglet="musique">Musique</button></div>
 <script type="module" src="app.js"></script>
 </body>
 </html>

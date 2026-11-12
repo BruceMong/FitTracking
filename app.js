@@ -77,10 +77,12 @@ async function api(fonction, params = {}) {
 // ───────────────────────────────────────── l'état
 
 let ctx = lire("carnet:ctx");                  // contexte poussé par le PC
-// Grand format (voir plus bas) : grandPref survit d'une séance à l'autre, grandVu dit s'il est à l'écran.
-let grandPref = lire("carnet:grand", false), grandVu = false, grandEtat = "";
+// grandVu dit si la vue Exercice est à l'écran (recalculé à chaque dessiner()) ; la vue choisie (vue) est plus bas.
+let grandVu = false, grandEtat = "";
+// L'ancienne préférence du grand format facultatif : la vue Exercice l'a remplacé, on la retire.
+try { localStorage.removeItem("carnet:grand"); } catch {}
 // Montre : à la fin de chaque repos, une notification « Série faite » que la montre (Garmin) relaie.
-let montre = lire("carnet:montre", false);
+const montre = false;   // carte « Valider depuis la montre » retirée le 2026-11-12 : plus de notification relayée
 // Pont de l'APK (plugin Capacitor « Montre ») : absent dans Chrome, et alors rien du pont ne tourne. pontPresente :
 // l'appli montre est ouverte (etat() puis l'événement connexion) ; pontDg : dernier geste appliqué ; pontV :
 // dernière version d'état envoyée ; pontFait : l'id de la dernière étape notée depuis le dernier plan envoyé.
@@ -95,11 +97,16 @@ let pontReposVu = null, pontPlanVu = null;   // derniers repos (hors v) et plan 
 let pontVisibleA = pont ? Date.now() : 0, pontFinOk = true, pontNotifs = true, pontNotifsDit = false, pontTu = null;
 let distantes = lire("carnet:seances", []);    // séances des 90 derniers jours, vues du serveur
 const jour = aujourdhui();
+// L'onglet Séance a deux vues (voir « Vue Exercice » plus bas) : « exercice », un exercice à la fois en plein écran,
+// et « liste », les cartes de la séance. La vue choisie est gardée pour la journée : chaque séance s'ouvre sur la
+// vue Exercice. exoChoisi : l'exercice touché dans la Liste, montré même s'il est fini (pour le corriger).
+let vue = lire("carnet:vue")?.jour === jour && lire("carnet:vue").vue === "liste" ? "liste" : "exercice", exoChoisi = null;
 let doc = lire(`carnet:seance:${jour}`)?.doc || null;
 let ouvert = null;                            // exercice dont la saisie est dépliée
 let saisie = lire(`carnet:saisie:${jour}`, {});  // nom → {edits: {ligne: {c, r}}, extra} : lignes prévues réglées à la main
-let memoEdite = null;                         // exercice dont le mémo est en cours de modification
+let typeTouche = null;                        // { t, quand } : dernier toucher sur un type de séance (le second confirme)
 let choisie = null;                           // [nom, ligne] sélectionnée (sinon : la prochaine série)
+let feuilleOuverte = null, feuilleHtml = "";  // la feuille du bas ouverte : { quoi: "serie" | "menu" | "memo" | "note", nom, k, ech }
 let onglet = "seance";                        // « seance », « sante » ou « progres »
 let exoGraphe = lire("carnet:exo-graphe");    // exercice tracé dans Progrès
 
@@ -149,23 +156,39 @@ function schemaDe(nom) {
 // On enchaîne une série de chacun, puis un seul repos (120 s). Clé stable d'une paire = les deux noms triés.
 const partenaireSuperset = (nom) => ctx?.supersets?.[nom];
 const clefSuperset = (a, b) => [a, b].sort().join(" + ");
-// Paires débranchées pour la journée (machine prise, pas envie) : l'étiquette ⚡ de la carte bascule, ou
-// « Sans superset » pendant l'enchaînement. Gardé par jour dans le téléphone : un rafraîchissement ne la rebranche pas.
-const SS_OFF = `carnet:ss-off:${jour}`;
-const ssOff = new Set(lire(SS_OFF, []));
-// Valeurs vues au dernier dessiner() : la saisie et les paires coupées changent le plan de la montre.
-let saisieVue = JSON.stringify(saisie), ssOffVu = JSON.stringify([...ssOff]), exoGrandVu;
-// Les clés « du jour » (paires coupées, saisie, appuis de la montre notés et annulés) : celles des jours passés partent.
-const PAR_JOUR = ["carnet:ss-off:", "carnet:saisie:", "carnet:montre-notes:", "carnet:montre-annules:"];
+// Paires enchaînées pour la journée : le superset du programme est désactivé par défaut, on l'active au besoin
+// (étiquette ⚡ de la carte, ou « Sans superset » pendant l'enchaînement pour le couper). Gardé par jour dans le
+// téléphone : un rafraîchissement ne le débranche pas.
+const SS_ON = `carnet:ss-on:${jour}`;
+const ssOn = new Set(lire(SS_ON, []));
+// Ancienne clé (superset actif par défaut, paires coupées) : sans objet, on la retire.
+try { localStorage.removeItem(`carnet:ss-off:${jour}`); } catch {}
+// Valeurs vues au dernier dessiner() : la saisie et les paires activées changent le plan de la montre.
+let saisieVue = JSON.stringify(saisie), ssOnVu = JSON.stringify([...ssOn]), exoGrandVu;
+// Les clés « du jour » (paires activées, saisie, appuis de la montre notés et annulés) : celles des jours passés partent.
+const PAR_JOUR = ["carnet:ss-on:", "carnet:ss-off:", "carnet:saisie:", "carnet:montre-notes:", "carnet:montre-annules:"];
 try { for (const k of Object.keys(localStorage)) if (PAR_JOUR.some((p) => k.startsWith(p) && k !== p + jour)) localStorage.removeItem(k); } catch {}
-const ssActif = (nom) => { const p = partenaireSuperset(nom); return !!p && !ssOff.has(clefSuperset(nom, p)); };
+const ssActif = (nom) => { const p = partenaireSuperset(nom); return !!p && ssOn.has(clefSuperset(nom, p)); };
 function couperSuperset(a, b, off) {
   const k = clefSuperset(a, b);
-  if (off) ssOff.add(k); else ssOff.delete(k);
-  ecrire(SS_OFF, [...ssOff]);
+  if (off) ssOn.delete(k); else ssOn.add(k);
+  ecrire(SS_ON, [...ssOn]);
   // Rien fait encore sur la paire : elle n'est plus marquée superset dans seances.md.
   const s = seanceDuJour(), ea = s.exos.find((x) => x.nom === a), eb = s.exos.find((x) => x.nom === b);
   if (off && !ea?.series?.length && !eb?.series?.length) { if (ea) delete ea.ss; if (eb) delete eb.ss; }
+}
+// Active ou coupe la paire de `nom` pour la journée ; rend l'état après bascule (faux sans partenaire).
+function basculerSuperset(nom) {
+  const a = nom, b = partenaireSuperset(a);
+  if (!b) return false;
+  const off = ssActif(a);
+  couperSuperset(a, b, off);
+  if (off && minu?.mode === "superset" && [a, b].includes(minu.nom)) {
+    const from = minu.ssFrom || minu.nom;
+    lancerRepos(from, `${from} · repos`, "");
+  }
+  toast(off ? `Sans superset aujourd'hui : ${a}, puis ${b}` : `Superset aujourd'hui : ${a} ↔ ${b}`);
+  return !off;
 }
 
 // Jamais deux crans d'un coup sur ces exercices : l'épaule droite (même liste que herdr-sante, PRUDENCE).
@@ -490,17 +513,19 @@ function exosAffiches(d) {
 
 function dessiner() {
   // Point commun à tous les gestes : la saisie du jour est gardée, et un changement (saisie, paire de
-  // superset coupée, exercice proposé ensuite : « suiv », « go », une carte ouverte) republie le plan pour
+  // superset activée, exercice proposé ensuite : « suiv », « go », une carte ouverte) republie le plan pour
   // la montre 1,5 s plus tard.
   // La saisie est écrite avant exoGrand(), dont les lignesDe y ajoutent les entrées par défaut.
-  const s = JSON.stringify(saisie), o = JSON.stringify([...ssOff]);
+  const s = JSON.stringify(saisie), o = JSON.stringify([...ssOn]);
   if (s !== saisieVue) ecrire(`carnet:saisie:${jour}`, saisie);
   const g = exoGrand();
-  if (s !== saisieVue || o !== ssOffVu || g !== exoGrandVu) {
-    saisieVue = s; ssOffVu = o; exoGrandVu = g;
+  if (s !== saisieVue || o !== ssOnVu || g !== exoGrandVu) {
+    saisieVue = s; ssOnVu = o; exoGrandVu = g;
     programmerPublication();
   }
-  dessinerPage(); majGrand(true);
+  grandVu = vueExercice();
+  if (grandVu) { ecranAllume(); if (!history.state?.exercice) history.pushState({ exercice: 1 }, ""); }
+  dessinerPage(); majGrand(true); majRepos(); majFeuille();
   envoyerPlanPont();
 }
 
@@ -529,7 +554,7 @@ function dessinerPage() {
     h += `<div class="carte conseil"><b>Repos selon la rotation</b>Posture et étirements sur le tapis.</div>`;
   }
   if (s.excuse) h += `<div class="carte conseil"><b>Jour excusé : ${esc(s.excuse.tag)}</b>Ne compte pas comme un jour manqué.</div>`;
-  h += `<div class="types">${TYPES.map((t) => `<button data-type="${t}" class="${t === s.type ? "choisi" : ""}">${t}${t === p ? " ·" : ""}</button>`).join("")}</div>`;
+  h += `<div class="types">${TYPES.map((t) => `<div class="type"><button data-type="${t}" class="${t === s.type ? "choisi" : ""}">${t}</button>${t === p ? `<span class="type-du-jour">du jour</span>` : ""}</div>`).join("")}</div>`;
   const faitesTot = s.exos.reduce((a, e) => a + (e.series?.length || 0), 0);
   let duree = "";
   if (faitesTot) {
@@ -557,82 +582,38 @@ function dessinerPage() {
   for (const nom of exosAffiches(s)) {
     const e = s.exos.find((x) => x.nom === nom);
     const faites = e?.series || [];
-    const { L, W, k0, ks, der, ci, n, pas, mode } = lignesDe(nom);
+    const { L, der, ci, n } = lignesDe(nom);
     const hp = horsProg(s, e);
-    h += `<div class="carte exo ${ouvert === nom ? "ouvert" : ""} ${faites.length >= n ? "fait" : ""}" data-exo="${esc(nom)}">
-      <h3 data-ouvrir="${esc(nom)}"><span class="nom">${esc(nom)}${FICHES[nom] ? `<button class="info" data-fiche="${esc(nom)}" aria-label="Fiche de l'exercice">i</button>` : ""}</span><span class="n">${faites.length}/${n}</span></h3>`;
+    // Toute la carte ouvre la vue Exercice (data-aller) ; les corrections se font là-bas.
+    h += `<div class="carte exo ${faites.length >= n ? "fait" : ""}" data-exo="${esc(nom)}" data-aller="${esc(nom)}">
+      <h3><span class="nom">${esc(nom)}</span><span class="n">${faites.length}/${n}</span></h3>`;
     if (der) h += `<div class="sous">${jj(der.jour)} : ${esc(formatSeries(der.series))}</div>`;
     else h += `<div class="sous">pas encore d'historique</div>`;
-    const g = groupeDe(nom), rec = ctx?.records?.[nom];
-    const tg = [];
-    if (g) tg.push(`<span class="tag ${rc[g] != null ? etatRecup(rc[g]) : ""}">${esc(g)}${rc[g] >= 0.25 ? ` · ${Math.round(rc[g] * 100)} %` : ""}</span>`);
     const partN = partenaireSuperset(nom);
-    if (partN) tg.push(ssActif(nom)
-      ? `<button class="tag ss" data-superset="${esc(nom)}">⚡ superset · ${esc(partN)} <b>✕</b></button>`
-      : `<button class="tag ss off" data-superset="${esc(nom)}">sans superset · <b>réactiver</b></button>`);
-    if (rec?.charge) tg.push(`<span class="tag">record ${kg(rec.charge)} kg</span>`);
-    else if (rec?.reps) tg.push(`<span class="tag">record ${rec.reps} reps</span>`);
+    const tg = [];
+    if (partN && ssActif(nom)) tg.push(`<span class="tag ss">⚡ avec ${esc(partN)}</span>`);
     if (hp) tg.push(`<span class="tag jaune">hors progression</span>`);
     if (tg.length) h += `<div class="tags">${tg.join("")}</div>`;
     const mm = memo(nom);
-    if (memoEdite === nom)
-      h += `<div class="ligne2"><input id="memo-champ" value="${esc(mm)}" placeholder="cran 15 · siège 3 · prise large…"><button data-memo-ok>OK</button></div>`;
-    else if (mm || ouvert === nom)
-      h += `<div class="memo" data-memo="${esc(nom)}">📌 ${mm ? esc(mm) : "<i>ajouter un mémo de réglage</i>"}</div>`;
+    if (mm) h += `<div class="memo">📌 ${esc(mm)}</div>`;
     if (hp) h += `<div class="cible">→ aujourd'hui ne compte pas : la cible reste celle de la dernière fois</div>`;
     else if (ci) h += `<div class="cible ${ci.monte ? "monte" : ""} ${ci.decharge ? "decharge" : ""}">→ ${esc(ci.texte)}</div>`;
-    if (e?.note && ouvert !== nom) h += `<div class="remarque">✎ ${esc(e.note)}</div>`;
-    if (ouvert !== nom) {
-      // Carte fermée : le résumé en puces, échauffement, faites puis prévues (pointillé). Toucher une puce ouvre la carte.
-      const echF = (e?.ech || []).map((x) => `<span class="serie ech" data-ligne="0" data-nom="${esc(nom)}">é ${kg(x.c)}×${x.r}</span>`).join("");
-      if (L.length || echF) h += `<div class="series">${echF}${L.map((l) => l.fait
-        ? `<span class="serie" data-ligne="${l.k}" data-nom="${esc(nom)}">${serieTxt(nom, l.c, l.r)}${l.e != null ? `<small>@${l.e}</small>` : ""}</span>`
-        : `<span class="prevue" data-ligne="${l.k}" data-nom="${esc(nom)}">${serieTxt(nom, l.c, l.r)}</span>`).join("")}</div>`;
-    } else {
-      // Carte ouverte : une ligne par série, chacune avec ses − / + (charge au pas de l'exercice,
-      // répétitions) et son champ ; le rond de la prochaine la valide. Comme dans openGym : pas de
-      // ligne à sélectionner avant de régler. La réserve d'une série faite se touche pour la corriger.
-      // Glisser une série faite vers la gauche la retire (Annuler), vers la droite la recopie.
-      const k0e = W.findIndex((w) => !w.fait);
-      const ligne = (l, ech) => {
-        const suivante = ech ? l.k === k0e : l.k === k0;
-        const cls = l.fait ? "fait" : suivante ? "prochaine" : "prevue";
-        const fin = l.fait ? `<span class="ls-ok fait">✓</span>`
-          : suivante ? `<button class="ls-ok" ${ech ? "data-cocher-ech" : "data-cocher"} aria-label="Valider ${ech ? "l'échauffement" : `la série ${l.k + 1}`}"></button>`
-          : `<span class="ls-ok vide"></span>`;
-        const res = ech ? (l.fait ? `<button class="ls-e" data-ech-retirer aria-label="Retirer l'échauffement">×</button>` : `<span></span>`)
-          : mode !== "charge" ? (l.fait ? `<button class="ls-e" data-serie-retirer aria-label="Retirer la série ${l.k + 1}">×</button>` : `<span></span>`)
-          : l.fait ? `<button class="ls-e ${l.e != null ? "note" : ""}" data-res aria-label="Réserve">${l.e != null ? `@${l.e === 4 ? "4+" : l.e}` : "@?"}</button>` : `<span></span>`;
-        return `<div class="ls ${cls} ${ech ? "ech" : ""} ${!ech && l.k === ks ? "sel" : ""}" data-ligne="${l.k}" data-nom="${esc(nom)}" ${ech ? 'data-ech="1"' : ""}>
-          <span class="ls-n">${ech ? "é" : l.k + 1}</span>
-          ${mode === "charge" ? `<span class="pm"><button data-pm="c" data-d="-1" aria-label="moins ${kg(pas)} kg">−</button><input data-champ="c" inputmode="decimal" enterkeyhint="done" value="${l.c ? kg(l.c) : ""}" placeholder="pdc" aria-label="charge en kg"><button data-pm="c" data-d="1" aria-label="plus ${kg(pas)} kg">+</button></span>
-          <span class="pm"><button data-pm="r" data-d="-1" aria-label="une répétition de moins">−</button><input data-champ="r" inputmode="numeric" enterkeyhint="done" value="${l.r}" aria-label="répétitions"><button data-pm="r" data-d="1" aria-label="une répétition de plus">+</button></span>`
-          : `<span class="pm large"><button data-pm="r" data-d="-1" aria-label="${mode === "duree" ? "5 secondes de moins" : "une répétition de moins"}">−</button><span class="pm-val"><input data-champ="r" inputmode="numeric" enterkeyhint="done" value="${l.r}" aria-label="${mode === "duree" ? "secondes" : "répétitions"}"><small>${mode === "duree" ? "s" : "rép."}</small></span><button data-pm="r" data-d="1" aria-label="${mode === "duree" ? "5 secondes de plus" : "une répétition de plus"}">+</button></span>`}
-          ${res}${fin}</div>`;
-      };
-      h += mode === "charge" ? `<div class="ls-tete"><span></span><span>kg · pas ${kg(pas)}</span><span>reps</span><span>rés.</span><span></span></div>`
-        : `<div class="ls-tete sans-kg"><span></span><span>${mode === "duree" ? "tenue en secondes" : "répétitions, sans charge"}</span>
-            <button class="lien petit" data-mesure="${mode === "duree" ? "reps" : "duree"}">${mode === "duree" ? "en répétitions" : "en secondes"}</button></div>`;
-      h += `
-        <div class="lignes-series">${W.map((l) => ligne(l, true)).join("")}${L.map((l) => ligne(l, false)).join("")}</div>
-        <button class="lien petit grand-lien" data-grand>${ICONE_AGRANDIR} Grand format</button>`;
-      h += `<div class="saisie">`;
-      const ls = L.find((l) => l.k === ks);
-      if (ls) h += `<div class="sous sel-titre">Série ${ks + 1} : combien tu aurais pu en faire de plus ?</div>
-        <div class="reserve"><div class="choix">${boutonsReserve("data-reserve", ls.e)}</div></div>
-        <div class="deux"><button class="gros danger" data-retirer>Retirer</button><button class="gros secondaire" data-deselect>OK</button></div>`;
-      h += `<input class="note-exo" data-note-exo value="${esc(e?.note || "")}" placeholder="Note sur l'exercice (sensations, réglage, douleur…)">
-        <div class="liens"><button class="lien" data-plus-serie>+ une série</button>${mode === "charge" ? `<button class="lien" data-plus-ech>+ échauffement</button>` : ""}
-          <button class="lien" data-remplacer>⇄ remplacer</button></div>
-        ${s.hp ? "" : `<button class="lien petit" data-hp>${e?.hp ? "✓ hors progression aujourd'hui · annuler" : "Douleur, pas en forme : ne pas compter pour la progression"}</button>`}</div>`;
-    }
+    if (e?.note) h += `<div class="remarque">✎ ${esc(e.note)}</div>`;
+    // Le résumé en puces : échauffement, faites puis prévues (pointillé). Glisser une faite vers la gauche la retire.
+    const echF = (e?.ech || []).map((x) => `<span class="serie ech" data-ligne="0" data-nom="${esc(nom)}">é ${kg(x.c)}×${x.r}</span>`).join("");
+    if (L.length || echF) h += `<div class="series">${echF}${L.map((l) => l.fait
+      ? `<span class="serie" data-ligne="${l.k}" data-nom="${esc(nom)}">${serieTxt(nom, l.c, l.r)}${l.e != null ? `<small>@${l.e}</small>` : ""}</span>`
+      : `<span class="prevue" data-ligne="${l.k}" data-nom="${esc(nom)}">${serieTxt(nom, l.c, l.r)}</span>`).join("")}</div>`;
     h += `</div>`;
   }
   h += `<button class="lien" id="ajouter">+ Ajouter un exercice</button>`;
+  h += bilan(s, duree);
+  // La note générale : bilan de la séance, que Claude relit (seances.md, ligne « > »).
+  h += `<div class="carte"><b>Note de séance</b> <span class="sous">ce que Claude relira pour tes bilans</span>
+    <textarea id="note" style="margin-top:8px" placeholder="Comment ça s'est passé : forme, sensations, épaule, ce qui a coincé…">${esc(s.note)}</textarea></div>`;
   if (faitesTot) h += `<button class="lien petit" data-hp-seance>${s.hp ? "✓ Toute la séance hors progression · annuler"
     : "Jour sans (douleur, fatigue) : ne pas compter la séance pour la progression"}</button>`;
-  h += bilan(s, duree);
-  if (!faitesTot) {
+  else {
     // Un jour sans séance pour une raison valable : noté, il ne compte pas comme manqué.
     const ex = s.excuse;
     h += `<div class="carte"><b>${ex ? "Jour excusé" : "Pas de séance aujourd'hui ?"}</b>
@@ -640,34 +621,6 @@ function dessinerPage() {
       <div class="motifs">${MOTIFS.map((m) => `<button data-excuse="${m}" class="${ex?.tag === m ? "choisi" : ""}">${m}</button>`).join("")}</div>
       ${ex ? `<input id="excuse-texte" value="${esc(ex.texte || "")}" placeholder="Un mot (facultatif) : grippe, déplacement…">` : ""}</div>`;
   }
-  h += `<div class="carte"><button class="case ${montre ? "faite" : ""}" data-montre><i>${montre ? "✓" : ""}</i>
-    <span><b>Valider depuis la montre</b><span class="sous">à la fin de chaque repos, une notification « Série faite » que ta montre
-    relaie : la toucher note la série prévue et lance le repos. Les répétitions se corrigent ensuite ici.</span></span></button>
-    ${montre ? `<div class="sous montre-journal">${journalMontre.length ? `Derniers échanges avec la montre :<br>${journalMontre.slice(-5).reverse()
-      .map((x) => `${new Date(x.t).toTimeString().slice(0, 8)} · ${esc(x.quoi)}`).join("<br>")}` : "Journal vide : aucune notification ni aucun appui encore."}
-      <div class="ligne2"><button data-montre-test>Tester la montre</button><button data-montre-journal>Actualiser</button></div></div>` : ""}</div>`;
-  // Épaule droite : la douleur du jour règle la réintroduction des exercices en pause.
-  const dl = s.douleur;
-  h += `<div class="carte"><b>Épaule droite</b> <span class="sous">douleur aujourd'hui, de 0 à 10</span>
-    <div class="echelle">${Array.from({ length: 11 }, (_, i) => `<button data-douleur="${i}" class="${dl === i ? "choisi" : ""}"
-      style="${dl === i ? `background:${i <= 1 ? "var(--vert)" : i <= 3 ? "var(--jaune)" : "var(--rouge)"}` : ""}">${i}</button>`).join("")}</div></div>`;
-  const pes = ctx?.pesees?.length ? ctx.pesees[ctx.pesees.length - 1] : null;
-  const vieille = !pes || (new Date(jour) - new Date(pes[0])) / 864e5 > 7;
-  h += `<div class="carte"><b>Poids</b> <span class="sous">${pes ? `dernier : ${String(pes[1]).replace(".", ",")} kg le ${jj(pes[0])}` : "aucune pesée"}
-      ${vieille && !s.poids ? ' · <span class="alerte">pesée de la semaine</span>' : ""}</span>
-    <div class="ligne2"><input id="poids" inputmode="decimal" placeholder="kg, le matin à jeun" value="${s.poids ? String(s.poids).replace(".", ",") : ""}">
-      <button data-poids-ok>OK</button></div></div>`;
-  const nPhotos = lire("carnet:photos", []).length;
-  const dp = ctx?.photo_derniere;
-  const aRefaire = !dp || (new Date(jour) - new Date(dp)) / 864e5 >= 28;
-  h += `<div class="carte"><b>Photos de suivi</b> <span class="sous">${dp ? `dernières le ${jj(dp)}` : "aucune encore"}${aRefaire ? ' · <span class="alerte">à faire</span>' : ""}
-      ${nPhotos ? ` · ${nPhotos} en attente d'envoi` : ""}</span>
-    <div class="sous" style="margin-top:6px">Lumière naturelle, même endroit, toutes les 4 semaines.</div>
-    <div class="ligne2"><button data-photo="posture-profil">Posture de profil</button><button data-photo="peau">Peau</button>
-      <button data-photo="autre">Autre</button></div></div>`;
-  // La note générale, tout en bas : bilan de la séance, que Claude relit (seances.md, ligne « > »).
-  h += `<div class="carte"><b>Note de séance</b> <span class="sous">ce que Claude relira pour tes bilans</span>
-    <textarea id="note" style="margin-top:8px" placeholder="Comment ça s'est passé : forme, sensations, épaule, ce qui a coincé…">${esc(s.note)}</textarea></div>`;
   for (const x of ctx?.pause || []) h += `<p class="pause">⏸ ${esc(x.nom)} en pause : ${esc(x.raison)}</p>`;
   if (!ctx) h += `<p class="sous">Le PC n'a pas encore envoyé ton programme : il le fera à sa prochaine synchro.</p>`;
   app.innerHTML = h;
@@ -899,10 +852,7 @@ function progres() {
     h += courbeParSerie(exoGraphe, serie);
   } else h += `<div class="carte sous">Les courbes de chaque exercice apparaîtront après tes premières séances.</div>`;
 
-  // L'épaule et la course : le reste du corps est dans l'onglet Santé.
-  const douleurs = (ctx?.douleurs || []).slice();
-  for (const s of toutesSeances()) if (s.douleur != null) { const i = douleurs.findIndex((x) => x[0] === s.jour); if (i >= 0) douleurs.splice(i, 1); douleurs.push([s.jour, s.douleur]); }
-  h += courbe("Douleur à l'épaule", douleurs, { bas: 0, haut: 10, refs: [2], relier: 14, couleur: "var(--rouge)", jours: 120, legende: "sous 2 : on peut remonter" });
+  // La course : le reste du corps est dans l'onglet Santé.
   const cr = (ctx?.courses || []).map((c) => [c[0], c[2] / c[1]]);
   if (cr.length) h += courbe("Course — allure", cr, { jours: 365, relier: 30, couleur: "var(--jaune)", ajuster: true,
     fmt: (v) => `${Math.floor(v)}'${String(Math.round((v % 1) * 60)).padStart(2, "0")}`, legende: "min/km, plus bas = plus rapide" });
@@ -1069,6 +1019,41 @@ function journalDuJour() {
   return j;
 }
 
+// ───────────────────────────────────────── sections repliables
+
+// Un intertitre à toucher (chevron) suivi du corps, sauf quand la section est repliée. L'état de chaque
+// section est gardé dans carnet:replie ({ id: true|false }) ; sans choix, celui par défaut ci-dessous.
+// Le corps peut être une fonction : une section repliée ne construit pas ce qu'elle ne montre pas.
+const REPLIE_PAR_DEFAUT = { courbes: true, "rapport-tableau": true };
+const estReplie = (id, defaut = REPLIE_PAR_DEFAUT[id] === true) => lire("carnet:replie", {})[id] ?? defaut;
+function basculerReplie(id) {
+  ecrire("carnet:replie", { ...lire("carnet:replie", {}), [id]: !estReplie(id) });
+}
+function section(id, titre, corps, replieDefaut = REPLIE_PAR_DEFAUT[id] === true) {
+  const ferme = estReplie(id, replieDefaut);
+  return `<button class="section-tete" data-replie="${id}" aria-expanded="${!ferme}"><span>${titre}</span><i class="chevron">${ferme ? "▸" : "▾"}</i></button>`
+    + (ferme ? "" : typeof corps === "function" ? corps() : corps);
+}
+
+function cartePoids(s) {
+  const pes = ctx?.pesees?.length ? ctx.pesees[ctx.pesees.length - 1] : null;
+  const vieille = !pes || (new Date(jour) - new Date(pes[0])) / 864e5 > 7;
+  return `<div class="carte"><b>Poids</b> <span class="sous">${pes ? `dernier : ${String(pes[1]).replace(".", ",")} kg le ${jj(pes[0])}` : "aucune pesée"}
+      ${vieille && !s.poids ? ' · <span class="alerte">pesée de la semaine</span>' : ""}</span>
+    <div class="ligne2"><input id="poids" inputmode="decimal" placeholder="kg, le matin à jeun" value="${s.poids ? String(s.poids).replace(".", ",") : ""}">
+      <button data-poids-ok>OK</button></div></div>`;
+}
+function cartePhotos() {
+  const nPhotos = lire("carnet:photos", []).length;
+  const dp = ctx?.photo_derniere;
+  const aRefaire = !dp || (new Date(jour) - new Date(dp)) / 864e5 >= 28;
+  return `<div class="carte"><b>Photos de suivi</b> <span class="sous">${dp ? `dernières le ${jj(dp)}` : "aucune encore"}${aRefaire ? ' · <span class="alerte">à faire</span>' : ""}
+      ${nPhotos ? ` · ${nPhotos} en attente d'envoi` : ""}</span>
+    <div class="sous" style="margin-top:6px">Lumière naturelle, même endroit, toutes les 4 semaines.</div>
+    <div class="ligne2"><button data-photo="posture-profil">Posture de profil</button><button data-photo="peau">Peau</button>
+      <button data-photo="autre">Autre</button></div></div>`;
+}
+
 function aujourdhuiSante() {
   const S = ctx?.sante, j = journalDuJour();
   const routine = S?.routine || [];
@@ -1091,7 +1076,8 @@ function aujourdhuiSante() {
         return SOINS[r.cle] ? `<div class="case-ligne">${c}<button class="info" data-soin="${esc(r.cle)}" aria-label="Comment faire">i</button></div>` : c; }).join("")
       + `</div>`;
   }
-  return h;
+  const s = seanceDuJour();
+  return h + cartePoids(s) + cartePhotos();
 }
 
 // ───────────────────────────────────────── repas photographiés
@@ -1207,16 +1193,16 @@ function carteRapport() {
   const i = Math.min(rapportChoisi, R.length - 1), r = R[i], avant = R[i + 1];
   const age = Math.round((new Date(jour) - new Date(r.jour)) / 864e5);
   const ind = indicateurs(r.md), ind0 = avant ? indicateurs(avant.md) : {};
-  let h = `<div class="carte rapport"><div class="c-tete"><b>Rapport sport</b>
-    <span class="sous">${quand(r.jour)}${age > 1 ? ` · il y a ${age} j` : ""}${i ? "" : " · le dernier"}</span></div>`;
+  let h = `<div class="carte rapport"><div class="c-tete"><b>${i ? "Rapport précédent" : "Dernier rapport"}</b>
+    <span class="sous">${quand(r.jour)}${age > 1 ? ` · il y a ${age} j` : ""}</span></div>`;
   const bref = sectionMd(r.md, "En bref");
   if (bref) h += `<div class="md">${md(bref)}</div>`;
   const lignes = Object.entries(ind);
   if (lignes.length) {
-    h += `<div class="md-tab"><table class="rp-ind"><thead><tr><th></th><th>${jj(r.jour)}</th>${avant ? `<th>${jj(avant.jour)}</th>` : ""}</tr></thead><tbody>`
+    h += section("rapport-tableau", "Tableau comparatif", `<div class="md-tab"><table class="rp-ind"><thead><tr><th></th><th>${jj(r.jour)}</th>${avant ? `<th>${jj(avant.jour)}</th>` : ""}</tr></thead><tbody>`
       + lignes.map(([k, x]) => `<tr><td>${mdEnLigne(k)}${x.c ? `<span class="sous">cible ${mdEnLigne(x.c)}</span>` : ""}</td>
         <td>${mdEnLigne(x.v)}</td>${avant ? `<td class="sous">${mdEnLigne(ind0[k]?.v ?? "–")}</td>` : ""}</tr>`).join("")
-      + `</tbody></table></div>`;
+      + `</tbody></table></div>`);
   }
   if (rapportOuvert) {
     const reste = r.md.replace(/^# .*\n/, "").replace(/^## (En bref|Indicateurs)\s*\n[\s\S]*?(?=^## )/gm, "");
@@ -1236,90 +1222,98 @@ function sante() {
   let h = "";
 
   for (const a of S.alertes || []) h += `<div class="carte alerte-carte">${esc(a)}</div>`;
-  h += aujourdhuiSante();
-  h += carteRapport();
-  h += carteRepas();
+  h += section("aujourdhui", "Aujourd'hui", () => aujourdhuiSante() + carteRepas());
+  const rapport = carteRapport();
+  if (rapport) h += section("rapport", "Rapport sport", rapport);
+  h += section("nuit", "Ta nuit et tes indicateurs", () => {
+    let h = "";
+    // La dernière nuit connue : durée face à la cible, horaires, phases.
+    const n = dernier("sommeil");
+    if (n) {
+      const ph = [["profond", "Profond", "#5e5ce6"], ["leger", "Léger", "#0a84ff"], ["paradoxal", "Paradoxal", "#64d2ff"], ["eveil", "Éveil", "#ff9f0a"]]
+        .filter(([k]) => n[k]);
+      const tot = ph.reduce((s, [k]) => s + n[k], 0) || 1;
+      const ok = n.sommeil >= C.sommeil, court = n.sommeil < C.sommeil - 60;
+      h += `<div class="carte"><div class="c-tete"><b>Nuit</b><span class="sous">${quand(n.j)}${n.couche ? ` · ${n.couche} → ${n.leve}` : ""}</span></div>
+        <div class="nuit"><div class="t-val grand ${ok ? "vert" : court ? "rouge" : "jaune"}">${hm(n.sommeil)}</div>
+          <div class="sous">cible ${hm(C.sommeil)}${n.score ? `<br>score <b class="score">${n.score}</b>` : ""}</div></div>
+        <div class="phases">${ph.map(([k, , c]) => `<i style="width:${(n[k] / tot * 100).toFixed(1)}%;background:${c}"></i>`).join("")}</div>
+        <div class="legende">${ph.map(([k, nom, c]) => `<span><i style="background:${c}"></i>${nom} ${hm(n[k])}</span>`).join("")}</div></div>`;
+    } else h += `<div class="carte sous">Aucune nuit enregistrée récemment : porte la montre la nuit, puis ouvre Garmin Connect pour la synchroniser.</div>`;
 
-  // La dernière nuit connue : durée face à la cible, horaires, phases.
-  const n = dernier("sommeil");
-  if (n) {
-    const ph = [["profond", "Profond", "#5e5ce6"], ["leger", "Léger", "#0a84ff"], ["paradoxal", "Paradoxal", "#64d2ff"], ["eveil", "Éveil", "#ff9f0a"]]
-      .filter(([k]) => n[k]);
-    const tot = ph.reduce((s, [k]) => s + n[k], 0) || 1;
-    const ok = n.sommeil >= C.sommeil, court = n.sommeil < C.sommeil - 60;
-    h += `<div class="carte"><div class="c-tete"><b>Nuit</b><span class="sous">${quand(n.j)}${n.couche ? ` · ${n.couche} → ${n.leve}` : ""}</span></div>
-      <div class="nuit"><div class="t-val grand ${ok ? "vert" : court ? "rouge" : "jaune"}">${hm(n.sommeil)}</div>
-        <div class="sous">cible ${hm(C.sommeil)}${n.score ? `<br>score <b class="score">${n.score}</b>` : ""}</div></div>
-      <div class="phases">${ph.map(([k, , c]) => `<i style="width:${(n[k] / tot * 100).toFixed(1)}%;background:${c}"></i>`).join("")}</div>
-      <div class="legende">${ph.map(([k, nom, c]) => `<span><i style="background:${c}"></i>${nom} ${hm(n[k])}</span>`).join("")}</div></div>`;
-  } else h += `<div class="carte sous">Aucune nuit enregistrée récemment : porte la montre la nuit, puis ouvre Garmin Connect pour la synchroniser.</div>`;
+    // Les mesures du matin, chacune à sa dernière valeur connue.
+    const v = dernier("vfc"), fc = dernier("fc"), bb = dernier("bb"), st = dernier("stress"), sp = dernier("spo2"), rs = dernier("resp");
+    const tonVfc = !v ? "" : v.vfc_bas && v.vfc < v.vfc_bas ? "jaune" : "vert";
+    const tonFc = !fc || !S.fc30 ? "" : fc.fc >= S.fc30 + 5 ? "rouge" : fc.fc > S.fc30 + 2 ? "jaune" : "vert";
+    const tonBb = !bb ? "" : bb.bb < 40 ? "rouge" : bb.bb < 70 ? "jaune" : "vert";
+    const tonSt = !st ? "" : st.stress > 50 ? "rouge" : st.stress > 25 ? "jaune" : "vert";
+    h += `<div class="tuiles">`
+      + tuile("VFC", v?.vfc, " ms", v ? (v.vfc_bas ? `habituel ${v.vfc_bas}–${v.vfc_haut}${v.j < jour ? ` · ${quand(v.j)}` : ""}` : quand(v.j)) : "", tonVfc)
+      + tuile("FC au repos", fc?.fc, " bpm", fc ? (S.fc30 ? `moyenne ${S.fc30} · ${quand(fc.j)}` : quand(fc.j)) : "", tonFc)
+      + tuile("Body Battery", bb?.bb, "", bb ? `max${bb.bb_min != null ? ` · min ${bb.bb_min}` : ""} · ${quand(bb.j)}` : "", tonBb)
+      + tuile("Stress", st?.stress, "", st ? `moyenne · ${quand(st.j)}` : "", tonSt)
+      + tuile("SpO2", sp ? Math.round(sp.spo2) : null, " %", sp ? `nuit · ${quand(sp.j)}` : "", sp ? (sp.spo2 < 92 ? "rouge" : "vert") : "")
+      + tuile("Respiration", rs ? Math.round(rs.resp) : null, " /min", rs ? `éveil · ${quand(rs.j)}` : "", "")
+      + `</div>`;
 
-  // Les mesures du matin, chacune à sa dernière valeur connue.
-  const v = dernier("vfc"), fc = dernier("fc"), bb = dernier("bb"), st = dernier("stress"), sp = dernier("spo2"), rs = dernier("resp");
-  const tonVfc = !v ? "" : v.vfc_bas && v.vfc < v.vfc_bas ? "jaune" : "vert";
-  const tonFc = !fc || !S.fc30 ? "" : fc.fc >= S.fc30 + 5 ? "rouge" : fc.fc > S.fc30 + 2 ? "jaune" : "vert";
-  const tonBb = !bb ? "" : bb.bb < 40 ? "rouge" : bb.bb < 70 ? "jaune" : "vert";
-  const tonSt = !st ? "" : st.stress > 50 ? "rouge" : st.stress > 25 ? "jaune" : "vert";
-  h += `<div class="tuiles">`
-    + tuile("VFC", v?.vfc, " ms", v ? (v.vfc_bas ? `habituel ${v.vfc_bas}–${v.vfc_haut}${v.j < jour ? ` · ${quand(v.j)}` : ""}` : quand(v.j)) : "", tonVfc)
-    + tuile("FC au repos", fc?.fc, " bpm", fc ? (S.fc30 ? `moyenne ${S.fc30} · ${quand(fc.j)}` : quand(fc.j)) : "", tonFc)
-    + tuile("Body Battery", bb?.bb, "", bb ? `max${bb.bb_min != null ? ` · min ${bb.bb_min}` : ""} · ${quand(bb.j)}` : "", tonBb)
-    + tuile("Stress", st?.stress, "", st ? `moyenne · ${quand(st.j)}` : "", tonSt)
-    + tuile("SpO2", sp ? Math.round(sp.spo2) : null, " %", sp ? `nuit · ${quand(sp.j)}` : "", sp ? (sp.spo2 < 92 ? "rouge" : "vert") : "")
-    + tuile("Respiration", rs ? Math.round(rs.resp) : null, " /min", rs ? `éveil · ${quand(rs.j)}` : "", "")
-    + `</div>`;
+    // La semaine en cours.
+    const auj = J.find((x) => x.j === jour);
+    const lundi = new Date(new Date(jour) - ((new Date(jour).getDay() + 6) % 7) * 864e5).toISOString().slice(0, 10);
+    const nSeances = Math.max(S.seances_semaine || 0, Object.keys(muscuParJour()).filter((d) => d >= lundi && d <= jour).length);
+    h += `<div class="carte"><b>Cette semaine</b>`
+      + jauge("Pas aujourd'hui", auj?.pas, C.pas, `${(auj?.pas || 0).toLocaleString("fr-FR")} / ${C.pas.toLocaleString("fr-FR")}`)
+      + jauge("Séances", nSeances, C.seances, `${nSeances} / ${C.seances}`)
+      + jauge("Minutes intensives", S.intensif_semaine, C.intensif, `${S.intensif_semaine ?? 0} / ${C.intensif}`)
+      + `</div>`;
 
-  // La semaine en cours.
-  const auj = J.find((x) => x.j === jour);
-  const lundi = new Date(new Date(jour) - ((new Date(jour).getDay() + 6) % 7) * 864e5).toISOString().slice(0, 10);
-  const nSeances = Math.max(S.seances_semaine || 0, Object.keys(muscuParJour()).filter((d) => d >= lundi && d <= jour).length);
-  h += `<div class="carte"><b>Cette semaine</b>`
-    + jauge("Pas aujourd'hui", auj?.pas, C.pas, `${(auj?.pas || 0).toLocaleString("fr-FR")} / ${C.pas.toLocaleString("fr-FR")}`)
-    + jauge("Séances", nSeances, C.seances, `${nSeances} / ${C.seances}`)
-    + jauge("Minutes intensives", S.intensif_semaine, C.intensif, `${S.intensif_semaine ?? 0} / ${C.intensif}`)
-    + `</div>`;
+    // Le sommeil sur la semaine : dette, régularité, heure conseillée.
+    const r = S.regularite;
+    h += `<div class="carte"><b>Sommeil</b><div class="lignes">
+      <div><span>Dette sur 7 nuits</span><b class="${S.dette > 240 ? "rouge" : S.dette > 120 ? "jaune" : ""}">${S.nuits ? hm(S.dette) : "–"}</b></div>
+      <div><span>Coucher moyen</span><b>${r ? `${r.heure} <small class="sous">± ${r.ecart} min</small>` : "–"}</b></div>
+      <div><span>Ce soir, au lit à</span><b class="bleu">${esc(S.coucher_conseil)}</b></div></div>
+      ${r ? `<div class="sous">${r.ecart <= 30 ? "Horaires réguliers" : "Horaires irréguliers : vise la même heure chaque soir"} (${r.nuits} nuits).</div>` : ""}</div>`;
 
-  // Le sommeil sur la semaine : dette, régularité, heure conseillée.
-  const r = S.regularite;
-  h += `<div class="carte"><b>Sommeil</b><div class="lignes">
-    <div><span>Dette sur 7 nuits</span><b class="${S.dette > 240 ? "rouge" : S.dette > 120 ? "jaune" : ""}">${S.nuits ? hm(S.dette) : "–"}</b></div>
-    <div><span>Coucher moyen</span><b>${r ? `${r.heure} <small class="sous">± ${r.ecart} min</small>` : "–"}</b></div>
-    <div><span>Ce soir, au lit à</span><b class="bleu">${esc(S.coucher_conseil)}</b></div></div>
-    ${r ? `<div class="sous">${r.ecart <= 30 ? "Horaires réguliers" : "Horaires irréguliers : vise la même heure chaque soir"} (${r.nuits} nuits).</div>` : ""}</div>`;
-
-  // Le ressenti noté dans le panneau, 14 derniers jours.
-  const res = Object.fromEntries((S.ressenti || []).map((x) => [x[0], x]));
-  const jours14 = Array.from({ length: 14 }, (_, k) => new Date(new Date(jour) - (13 - k) * 864e5).toISOString().slice(0, 10));
-  const coul = (x) => (x == null ? "" : `background:${["#ff453a", "#ff9f0a", "#ffd60a", "#a4e05a", "#30d158"][x - 1]}`);
-  h += `<div class="carte"><b>Ressenti</b> <span class="sous">14 jours, noté dans le panneau</span><div class="ressenti">`
-    + [["Énergie", 1], ["Humeur", 2], ["Peau", 3]].map(([nom, i]) => {
-      const vals = jours14.map((d) => res[d]?.[i] ?? null), notes = vals.filter((x) => x != null);
-      return `<span class="r-nom">${nom}</span><span class="points">${vals.map((x) => `<i style="${coul(x)}"></i>`).join("")}</span>
-        <span class="r-moy">${notes.length ? virgule(notes.reduce((a, b) => a + b, 0) / notes.length) : "–"}</span>`;
-    }).join("") + `</div></div>`;
+    // Le ressenti noté dans le panneau, 14 derniers jours.
+    const res = Object.fromEntries((S.ressenti || []).map((x) => [x[0], x]));
+    const jours14 = Array.from({ length: 14 }, (_, k) => new Date(new Date(jour) - (13 - k) * 864e5).toISOString().slice(0, 10));
+    const coul = (x) => (x == null ? "" : `background:${["#ff453a", "#ff9f0a", "#ffd60a", "#a4e05a", "#30d158"][x - 1]}`);
+    h += `<div class="carte"><b>Ressenti</b> <span class="sous">14 jours, noté dans le panneau</span><div class="ressenti">`
+      + [["Énergie", 1], ["Humeur", 2], ["Peau", 3]].map(([nom, i]) => {
+        const vals = jours14.map((d) => res[d]?.[i] ?? null), notes = vals.filter((x) => x != null);
+        return `<span class="r-nom">${nom}</span><span class="points">${vals.map((x) => `<i style="${coul(x)}"></i>`).join("")}</span>
+          <span class="r-moy">${notes.length ? virgule(notes.reduce((a, b) => a + b, 0) / notes.length) : "–"}</span>`;
+      }).join("") + `</div></div>`;
+    return h;
+  });
 
   // Les tendances, sur la période choisie.
-  const pt = (cle) => J.map((x) => [x.j, x[cle]]);
-  const o = { jours: periode, relier: periode > 30 ? 4 : 2 };
-  h += `<div class="periode">${[30, 90].map((p) => `<button data-periode="${p}" class="${p === periode ? "choisi" : ""}">${p} jours</button>`).join("")}</div>`;
-  const pes = pesees();
-  h += courbe("Poids", pes, { relier: 60, jours: 365, ajuster: true, fmt: (v) => virgule(v), legende: "kg" });
-  h += poidsSemaines(pes);
-  h += courbe("Sommeil", pt("sommeil"), { ...o, refs: [C.sommeil], fmt: hm, couleur: "#5e5ce6", legende: "pointillés : ta cible" });
-  h += courbe("VFC (nuit)", pt("vfc"), { ...o, bande: v?.vfc_bas ? [v.vfc_bas, v.vfc_haut] : null, couleur: "var(--vert)", legende: "ms, bande verte : ton habituel" });
-  h += courbe("FC au repos", pt("fc"), { ...o, couleur: "var(--rouge)", legende: "bpm" });
-  h += courbe("Body Battery", pt("bb"), { ...o, bas: 0, haut: 100, couleur: "#64d2ff", legende: "maximum du jour" });
-  h += courbe("Stress", pt("stress"), { ...o, bas: 0, couleur: "#ff9f0a", legende: "moyenne du jour" });
-  h += courbe("Pas", pt("pas"), { ...o, refs: [C.pas], bas: 0, fmt: (v) => (v >= 1000 ? `${virgule(v / 1000)}k` : String(Math.round(v))), couleur: "var(--bleu)" });
-  h += courbe("Heure de coucher", pt("coucher"), { ...o, fmt: (v) => { const t = Math.round(v) + 1080; return `${String(Math.floor(t / 60) % 24).padStart(2, "0")}:${String(t % 60).padStart(2, "0")}`; },
-    couleur: "var(--violet)", legende: "plus c'est plat, plus c'est régulier" });
+  h += section("courbes", "Courbes", () => {
+    let h = "";
+    const pt = (cle) => J.map((x) => [x.j, x[cle]]);
+    const o = { jours: periode, relier: periode > 30 ? 4 : 2 };
+    const v = dernier("vfc");
+    h += `<div class="periode">${[30, 90].map((p) => `<button data-periode="${p}" class="${p === periode ? "choisi" : ""}">${p} jours</button>`).join("")}</div>`;
+    const pes = pesees();
+    h += courbe("Poids", pes, { relier: 60, jours: 365, ajuster: true, fmt: (v) => virgule(v), legende: "kg" });
+    h += poidsSemaines(pes);
+    h += courbe("Sommeil", pt("sommeil"), { ...o, refs: [C.sommeil], fmt: hm, couleur: "#5e5ce6", legende: "pointillés : ta cible" });
+    h += courbe("VFC (nuit)", pt("vfc"), { ...o, bande: v?.vfc_bas ? [v.vfc_bas, v.vfc_haut] : null, couleur: "var(--vert)", legende: "ms, bande verte : ton habituel" });
+    h += courbe("FC au repos", pt("fc"), { ...o, couleur: "var(--rouge)", legende: "bpm" });
+    h += courbe("Body Battery", pt("bb"), { ...o, bas: 0, haut: 100, couleur: "#64d2ff", legende: "maximum du jour" });
+    h += courbe("Stress", pt("stress"), { ...o, bas: 0, couleur: "#ff9f0a", legende: "moyenne du jour" });
+    h += courbe("Pas", pt("pas"), { ...o, refs: [C.pas], bas: 0, fmt: (v) => (v >= 1000 ? `${virgule(v / 1000)}k` : String(Math.round(v))), couleur: "var(--bleu)" });
+    h += courbe("Heure de coucher", pt("coucher"), { ...o, fmt: (v) => { const t = Math.round(v) + 1080; return `${String(Math.floor(t / 60) % 24).padStart(2, "0")}:${String(t % 60).padStart(2, "0")}`; },
+      couleur: "var(--violet)", legende: "plus c'est plat, plus c'est régulier" });
+    return h;
+  });
 
-  if (S.objectifs?.length) {
+  if (S.objectifs?.length) h += section("objectifs", "Objectifs", () => {
     const obj = S.objectifs.map((x) => ({ ...x, ok: etatGeste("objectifs", x.texte, x.fait) }));
-    h += `<div class="carte"><b>Objectifs</b> <span class="sous">${obj.filter((x) => x.ok).length}/${obj.length}</span>`
+    return `<div class="carte"><b>Objectifs</b> <span class="sous">${obj.filter((x) => x.ok).length}/${obj.length}</span>`
       + obj.map((x) => `<button class="case ${x.ok ? "faite" : ""}" data-objectif="${esc(x.texte)}"><i>${x.ok ? "✓" : ""}</i>
         <span><b>${esc(x.texte)}</b>${x.ok && x.le ? `<span class="sous">atteint le ${esc(x.le)}</span>` : ""}</span></button>`).join("") + `</div>`;
-  }
+  });
   h += `<p class="sous">Montre synchronisée jusqu'au ${S.montre ? jj(S.montre) : "–"}${ctx.genere ? ` · PC vu le ${jj(ctx.genere)} à ${ctx.genere.slice(11, 16)}` : ""}.
     Repères tirés d'une montre de sport, pas un avis médical.</p>`;
   return h;
@@ -1329,7 +1323,7 @@ function sante() {
 
 // Un geste se fait en trois temps : noter (l'état de la séance et de la saisie), décider la suite (sans
 // effet), puis les effets (vibration, enregistrement, repos). Scindés pour que le plan publié pour la
-// montre rejoue exactement la même décision que le grand format, sur une copie de l'état, sans rien
+// montre rejoue exactement la même décision que la vue Exercice, sur une copie de l'état, sans rien
 // lancer ni enregistrer.
 
 // L'échauffement à faire de l'exercice, noté fait à l'heure t : { l } (la ligne notée), ou null s'il
@@ -1346,10 +1340,11 @@ function noterEchauffement(nom, t = new Date().toTimeString().slice(0, 8)) {
   return { l };
 }
 
-// Un échauffement fait (bouton de la carte, grand format ou montre) : repos court, sans réserve.
+// Un échauffement fait (bouton de la carte, vue Exercice ou montre) : repos court, sans réserve.
 function cocherEchauffement(nom) {
   const note = noterEchauffement(nom);
   if (!note) return;
+  exoChoisi = null;
   pontFait = `${jour}|${nom}|e${note.l.k}`;
   // Un échauffement fait : un repos court (1 min), sans réserve à noter.
   navigator.vibrate?.(30);
@@ -1386,7 +1381,7 @@ function noterSerie(nom, t = new Date().toTimeString().slice(0, 8)) {
 // - { quoi: "fin", autre } : l'exercice est fini ; autre : un autre exercice affiché a encore des séries ;
 // - { quoi: "repos", duree: 120, ss: true } : repos après la paire du superset ;
 // - { quoi: "repos", duree } : le repos de l'exercice.
-// « Repos seul » (ssOff) débranche la paire pour la séance (machine occupée) : chacun se fait seul.
+// « Repos seul » coupe la paire activée pour la séance (machine occupée) : chacun se fait seul.
 function suiteApres(nom, { e, L, k0, n }) {
   const s = seanceDuJour();
   const part = partenaireSuperset(nom), ssOn = ssActif(nom);
@@ -1399,10 +1394,11 @@ function suiteApres(nom, { e, L, k0, n }) {
   return { quoi: "repos", duree: reposDe(nom) };
 }
 
-// La prochaine série de l'exercice, faite : depuis la carte, le grand format ou la montre.
+// La prochaine série de l'exercice, faite : depuis la carte, la vue Exercice ou la montre.
 function validerSerie(nom) {
   const note = noterSerie(nom);
   if (!note) return;
+  exoChoisi = null;
   pontFait = `${jour}|${nom}|${note.k0}`;
   const { e, L, k0, n, mode, ci } = note;
   navigator.vibrate?.(30);
@@ -1426,40 +1422,42 @@ function validerSerie(nom) {
   if (mode === "charge") { minu.effort = { nom, i: e.series.length - 1, vise: ci?.rs?.[e.series.length - 1] ?? ci?.r ?? schemaDe(nom).reps }; garder(); }
 }
 
+// Changer le type de la séance. Quand des séries (ou des échauffements) sont déjà notées, le changement les sépare
+// de leur séance : il faut toucher deux fois le même type, à moins de 3 s d'écart. Rend true si le type a changé.
+function changerType(t, maintenant = Date.now()) {
+  const s = seanceDuJour();
+  if (s.exos.some((e) => e.series?.length || e.ech?.length) && t !== s.type) {
+    if (!(typeTouche?.t === t && maintenant - typeTouche.quand <= 3000)) {
+      typeTouche = { t, quand: maintenant };
+      toast(`Toucher encore pour passer en ${t.charAt(0).toUpperCase() + t.slice(1)}`, false);
+      return false;
+    }
+  }
+  typeTouche = null;
+  s.type = t; ouvert = null; choisie = null; saisie = {}; sauver();
+  return true;
+}
+
 let sansClic = 0;   // après un glissement sur une série, le clic qui suit ne la sélectionne pas
 document.addEventListener("click", (ev) => {
   if (ev.target.closest("[data-cle-coller]")) { collerCle($("#cle-collee").value); return; }
   if (Date.now() - sansClic < 450) return;
   if (ev.target.closest("input, textarea, select")) return;   // un champ garde la main (et le clavier)
-  const t = ev.target.closest("button, h3, [data-ligne], [data-memo]");
-  if (!t) return;
+  const t = ev.target.closest("button, [data-ligne]");
+  if (!t) {
+    // Un toucher dans la carte, hors de ses boutons : la vue Exercice sur cet exercice.
+    const nm = ev.target.closest("[data-aller]")?.dataset.aller;
+    if (nm) { allerExercice(nm); choisie = null; dessiner(); }
+    return;
+  }
   const carte = t.closest("[data-exo]");
   const nom = carte?.dataset.exo;
   const s = seanceDuJour();
+  if (t.closest("#feuille") && (!t.matches("button") || clicFeuille(t, nom))) return;   // sinon le geste est celui des cartes
   if (t.dataset.fiche) {
     ouvrirFiche(t.dataset.fiche); return;
-  } else if (t.hasAttribute("data-grand")) {
-    ouvert = nom; ouvrirGrand(); return;
   } else if (t.dataset.soin) {
     ouvrirSoin(t.dataset.soin); return;
-  } else if (t.dataset.superset) {
-    // L'étiquette ⚡ coupe (ou rebranche) la paire pour la journée ; chaque exercice se fait alors seul.
-    const a = t.dataset.superset, b = partenaireSuperset(a), off = ssActif(a);
-    couperSuperset(a, b, off);
-    if (off && minu?.mode === "superset" && [a, b].includes(minu.nom)) {
-      const from = minu.ssFrom || minu.nom;
-      lancerRepos(from, `${from} · repos`, "");
-    }
-    toast(off ? `Sans superset aujourd'hui : ${a}, puis ${b}` : `Superset rebranché : ${a} ↔ ${b}`);
-    dessiner(); return;
-  } else if (t.closest("[data-memo]")) {
-    memoEdite = t.closest("[data-memo]").dataset.memo;
-    dessiner(); setTimeout(() => $("#memo-champ")?.focus(), 0); return;
-  } else if (t.hasAttribute("data-memo-ok")) {
-    const v = $("#memo-champ").value.trim().replace(/\|/g, "/");
-    ecrire(`carnet:memo:${memoEdite}`, v);
-    s.memos = { ...(s.memos || {}), [memoEdite]: v };   // part au PC avec la séance du jour
-    memoEdite = null; sauver();
   } else if (t.dataset.onglet) {
     onglet = t.dataset.onglet; window.scrollTo(0, 0);
   } else if (t.dataset.ressenti) {
@@ -1486,26 +1484,10 @@ document.addEventListener("click", (ev) => {
     if (x) geste("objectifs", x.texte, !etatGeste("objectifs", x.texte, x.fait));
   } else if (t.dataset.corps) {
     modeCorps = t.dataset.corps; ecrire("carnet:corps", modeCorps);
-  } else if (t.dataset.reserve != null) {
-    const { e, ks } = lignesDe(nom), x = e?.series?.[ks];
-    if (x) { const k = Number(t.dataset.reserve); if (x.e === k) delete x.e; else x.e = k; sauver(); }
   } else if (t.dataset.periode) {
     periode = Number(t.dataset.periode); ecrire("carnet:periode", periode);
-  } else if (t.hasAttribute("data-montre-test")) {
-    if (window.Notification?.permission !== "granted") { toast(`Notifications ${window.Notification?.permission === "denied" ? "refusées" : "pas encore autorisées"} pour le carnet`); Notification?.requestPermission?.(); }
-    else if (!navigator.serviceWorker?.controller) toast("Service worker pas encore actif : recharge le carnet");
-    else { navigator.serviceWorker.controller.postMessage({ test: true }); toast("Notification de test envoyée"); setTimeout(relireMontre, 800); }
-    return;
-  } else if (t.hasAttribute("data-montre-journal")) {
-    relireMontre(); return;
-  } else if (t.hasAttribute("data-montre")) {
-    montre = !montre; ecrire("carnet:montre", montre);
-    if (montre && window.Notification?.permission === "default") Notification.requestPermission();
-    toast(montre ? "Montre : la notification de fin de repos portera « Série faite »" : "Montre : désactivée");
-    prevenirSW();
-  } else if (t.dataset.douleur != null) {
-    const v = Number(t.dataset.douleur);
-    s.douleur = s.douleur === v ? null : v; sauver();
+  } else if (t.dataset.replie) {
+    basculerReplie(t.dataset.replie);
   } else if (t.hasAttribute("data-poids-ok")) {
     const v = parseFloat(($("#poids").value || "").replace(",", "."));
     if (v > 30 && v < 250) { s.poids = v; sauver(); } else { s.poids = null; sauver(); }
@@ -1514,9 +1496,7 @@ document.addEventListener("click", (ev) => {
   } else if (t.dataset.exoGraphe != null) {
     return;
   } else if (t.dataset.type) {
-    s.type = t.dataset.type; ouvert = null; choisie = null; saisie = {}; sauver();
-  } else if (t.dataset.ouvrir != null) {
-    ouvert = ouvert === nom ? null : nom; choisie = null;
+    if (!changerType(t.dataset.type)) return;
   } else if (t.dataset.mesure) {
     ecrire(`carnet:mesure:${nom}`, t.dataset.mesure); delete saisie[nom];
   } else if (t.dataset.pm) {
@@ -1528,20 +1508,8 @@ document.addEventListener("click", (ev) => {
     if (t.dataset.pm === "c") regler(nom, k, ech, "c", Math.max(0, (l.c || 0) + d * pas));
     else regler(nom, k, ech, "r", l.r + d * (mesureDe(nom) === "duree" ? 5 : 1));
     navigator.vibrate?.(8);
-  } else if (t.hasAttribute("data-res")) {
-    const k = Number(t.closest(".ls").dataset.ligne);
-    choisie = choisie?.[0] === nom && choisie[1] === k ? null : [nom, k];
   } else if (t.hasAttribute("data-cocher-ech")) {
     cocherEchauffement(nom);
-  } else if (t.hasAttribute("data-serie-retirer")) {
-    // Une série sans charge (posture, tenue) n'a pas de réserve à toucher, donc pas de « Retirer » : son ×.
-    retirerSerie(nom, Number(t.closest(".ls").dataset.ligne));
-  } else if (t.hasAttribute("data-ech-retirer")) {
-    const k = Number(t.closest(".ls").dataset.ligne), e = s.exos.find((x) => x.nom === nom);
-    if (!e?.ech?.[k]) return;
-    e.ech.splice(k, 1); lignesDe(nom).st.echEdits = {};
-    if (!e.ech.length) delete e.ech;
-    sauver();
   } else if (t.hasAttribute("data-plus-ech")) {
     lignesDe(nom).st.ech++;
   } else if (t.hasAttribute("data-remplacer")) {
@@ -1560,17 +1528,12 @@ document.addEventListener("click", (ev) => {
   } else if (t.hasAttribute("data-valider") || t.hasAttribute("data-cocher")) {
     validerSerie(nom);
   } else if (t.dataset.ligne != null) {
-    // Une puce de carte fermée l'ouvre ; dans une carte ouverte, la ligne se règle par ses boutons.
-    const nm = t.dataset.nom;
-    if (ouvert === nm) return;
-    ouvert = nm; choisie = null;
-  } else if (t.hasAttribute("data-retirer")) {
-    const { ks } = lignesDe(nom);
-    retirerSerie(nom, ks);
-  } else if (t.hasAttribute("data-deselect")) {
-    choisie = null;
+    // Une puce de la Liste est un coin de sa carte : elle ouvre la vue Exercice.
+    const nm = t.closest("[data-aller]")?.dataset.aller;
+    if (!nm) return;
+    allerExercice(nm); choisie = null;
   } else if (t.hasAttribute("data-plus-serie")) {
-    lignesDe(nom).st.extra++;
+    if (!plusDeFini(nom)) lignesDe(nom).st.extra++;
   } else if (t.id === "ajouter") {
     ouvrirAjout(); return;
   } else return;
@@ -1580,11 +1543,15 @@ document.addEventListener("click", (ev) => {
 document.addEventListener("change", (ev) => {
   if (ev.target.id === "choix-exo") { exoGraphe = ev.target.value; ecrire("carnet:exo-graphe", exoGraphe); dessiner(); }
   if (ev.target.dataset.champ) {
+    // La charge ou les répétitions tapées (vue Exercice, feuille d'une série), validées par « OK » du clavier ou en
+    // quittant le champ. Le champ est quitté (le clavier se ferme) ; le redessin attend la fin du geste en cours :
+    // le − / + ou « Série faite » touché pour quitter le champ reçoit son clic avant que l'écran soit réécrit.
     const row = ev.target.closest(".ls"), nom = row.dataset.nom, champ = ev.target.dataset.champ;
     const brut = ev.target.value.trim().replace(",", ".").toLowerCase();
     const v = champ === "c" && (brut === "" || brut === "pdc") ? 0 : parseFloat(brut);
     if (Number.isFinite(v)) regler(nom, Number(row.dataset.ligne), !!row.dataset.ech, champ, v);
-    dessiner();
+    ev.target.blur();
+    setTimeout(dessiner, 0);
   }
 });
 
@@ -1656,13 +1623,6 @@ document.addEventListener("input", (ev) => {
   if (ev.target.id === "repas-note") repasNote = ev.target.value;
   if (ev.target.id === "note-jour") geste("journal", "Note", ev.target.value);
   if (ev.target.id === "excuse-texte" && seanceDuJour().excuse) { seanceDuJour().excuse.texte = ev.target.value; sauver(); }
-  if (ev.target.hasAttribute("data-note-exo")) {
-    const nom = ev.target.closest("[data-exo]").dataset.exo, s = seanceDuJour();
-    let e = s.exos.find((x) => x.nom === nom);
-    if (!e) { e = { nom, series: [] }; s.exos.push(e); }
-    e.note = ev.target.value;
-    sauver();
-  }
 
 });
 
@@ -1734,20 +1694,36 @@ $("#fiche").addEventListener("click", (ev) => {
 // Ajouter un exercice hors programme : la liste du PC, ou un nom libre (le PC le signalera).
 // Pour remplacer un exercice (machine prise, d'après openGym) : ceux du même muscle d'abord.
 let remplace = null;
+// La liste du dialogue : nom, alias (« pec fly » → Écarté machine) ou groupe, sans tenir compte des accents ; les alias
+// servent à chercher mais ne s'affichent pas. Groupée par muscle ; en remplacement, le muscle de l'origine d'abord
+// (sans elle), puis les autres dans l'ordre du PC.
+function listeAjout(q, origine) {
+  const plat = (s) => (s || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  const qp = plat((q || "").trim());
+  const groupes = [];
+  for (const x of ctx?.exercices || []) {
+    if (x.nom === origine) continue;
+    if (qp && !(plat(x.nom).includes(qp) || plat(x.alias).includes(qp) || plat(x.groupe).includes(qp))) continue;
+    const g = x.groupe || "autres";
+    let e = groupes.find((y) => y.groupe === g);
+    if (!e) groupes.push(e = { groupe: g, noms: [] });
+    e.noms.push(x.nom);
+  }
+  const g0 = origine ? groupeDe(origine) : null;
+  const i = groupes.findIndex((y) => y.groupe === g0);
+  if (i > 0) groupes.unshift(...groupes.splice(i, 1));
+  return groupes;
+}
 function ouvrirAjout(origine = null) {
   const dlg = $("#ajout"), champ = $("#cherche");
   remplace = origine;
-  const g = origine ? groupeDe(origine) : null;
   $("#ajout-titre").textContent = origine ? `Remplacer ${origine}` : "Ajouter un exercice";
   const rendu = () => {
-    const q = champ.value.trim().toLowerCase();
-    // Nom, alias (« pec fly » → Écarté machine) ou groupe, sans tenir compte des accents.
-    const plat = (s) => (s || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-    const qp = plat(q);
-    const liste = (ctx?.exercices || []).filter((x) => x.nom !== origine && (q ? plat(x.nom).includes(qp)
-      || plat(x.alias).includes(qp) || plat(x.groupe).includes(qp) : !g || x.groupe === g));
-    $("#choix").innerHTML = liste.map((x) => `<button data-choix="${esc(x.nom)}">${esc(x.nom)} <span>${esc(x.groupe)}${x.alias ? ` · ${esc(x.alias)}` : ""}</span></button>`).join("")
-      + (q && !liste.some((x) => x.nom.toLowerCase() === q) ? `<button data-choix="${esc(champ.value.trim())}">+ « ${esc(champ.value.trim())} »</button>` : "");
+    const saisie = champ.value.trim(), liste = listeAjout(saisie, origine);
+    $("#choix").innerHTML = liste.map((g) => `<div class="choix-groupe">${esc(g.groupe)}</div>`
+      + g.noms.map((n) => `<button data-choix="${esc(n)}">${esc(n)}</button>`).join("")).join("")
+      + (saisie && !liste.some((g) => g.noms.some((n) => n.toLowerCase() === saisie.toLowerCase()))
+        ? `<button data-choix="${esc(saisie)}">+ « ${esc(saisie)} »</button>` : "");
   };
   champ.value = ""; rendu(); champ.oninput = rendu;
   dlg.showModal(); if (!origine) champ.focus();   // pour remplacer, la liste d'abord, sans clavier
@@ -1764,7 +1740,7 @@ $("#choix").addEventListener("click", (ev) => {
     if (o && !o.series?.length && !o.ech?.length) s.exos = s.exos.filter((x) => x !== o);
     remplace = null;
   }
-  ouvert = nom; $("#ajout").close(); sauver(); dessiner();
+  allerExercice(nom); $("#ajout").close(); sauver(); dessiner();
 });
 $("#fermer-ajout").addEventListener("click", () => $("#ajout").close());
 
@@ -1774,7 +1750,9 @@ $("#fermer-ajout").addEventListener("click", () => $("#ajout").close());
 // répétitions), pour la série identique qu'on vient de refaire.
 let glisse = null, annulation = null;
 document.addEventListener("touchstart", (ev) => {
-  const el = ev.target.closest(".ls.fait, .serie");
+  // Dans les cartes seulement : la vue Exercice porte elle-même la classe « serie » (son état). Les puces
+  // d'échauffement (data-ligne="0", sans rang de série) ne se glissent pas.
+  const el = ev.target.closest("#app .serie:not(.ech)");
   glisse = el ? { el, x: ev.touches[0].clientX, y: ev.touches[0].clientY } : null;
 }, { passive: true });
 document.addEventListener("touchmove", (ev) => {
@@ -1838,6 +1816,12 @@ const reposDe = (nom) => {
   return (schemaDe(nom).reps ?? 8) <= 6 ? 150 : 90;
 };
 let minu = lire("carnet:minuteur");   // {nom, quoi, cible, duree, fin, restant (si en pause), mode, debut}
+// Un repos (ou une fin d'exercice) d'un autre jour n'a plus de sens : la vue Exercice montrerait la séance d'hier.
+{
+  const t = minu ? minu.debut ?? (minu.fin ? minu.fin - (minu.duree || 0) * 1000 : null) : null;
+  const jourDe = (x) => { const d = new Date(x); d.setMinutes(d.getMinutes() - d.getTimezoneOffset()); return d.toISOString().slice(0, 10); };
+  if (minu && (t == null || jourDe(t) !== jour)) { minu = null; try { localStorage.removeItem("carnet:minuteur"); } catch {} }
+}
 let tic = null, sonne = false;
 // Les boutons ne sont réécrits que s'ils changent : réécrits à chaque tic (4 fois par seconde),
 // un appui tombant entre deux réécritures se perdait.
@@ -1850,13 +1834,13 @@ function lancerRepos(nom, quoi, cible, impose = null) {
   if (window.Notification?.permission === "default") Notification.requestPermission();   // une fois, au premier repos
 }
 function finExercice(nom) {
-  // En grand format, pas d'arrêt entre deux exercices : le repos de transition part tout seul et
+  // En vue Exercice, pas d'arrêt entre deux exercices : le repos de transition part tout seul et
   // l'écran montre déjà le suivant (exoGrand). Le dernier de la séance garde son écran de fin.
   if ((grandVu || montre) && exosAffiches(seanceDuJour()).some((n) => n !== nom && resteSeries(n)))
     return lancerRepos(nom, `${nom} : terminé ✓`, "", REPOS_TRANSITION);
   minu = { nom, quoi: `${nom} : terminé ✓`, cible: "Repos libre le temps de changer de machine", duree: 0, fin: 0, restant: null, mode: "fin", debut: Date.now() };
   garder();
-  // En grand format, l'écran attend : il pose la question de la réserve et propose la suite.
+  // En vue Exercice, l'écran attend : il pose la question de la réserve et propose la suite.
   setTimeout(() => { if (minu?.mode === "fin" && minu.nom === nom && !grandVu) arreterRepos(); }, 12000);
 }
 // Superset : pas de repos, on ouvre le partenaire et on enchaîne sa série. Le repos (120 s) viendra
@@ -1867,9 +1851,9 @@ function enchainerSuperset(partner, selfNom) {
   garder();
 }
 function garder() {
+  if (minu) exoChoisi = null;   // un repos ou un enchaînement impose l'exercice suivant
   ecrire("carnet:minuteur", minu); clearInterval(tic);
   tic = setInterval(() => { majRepos(); majGrand(); }, 250);
-  if (grandPref && minu) montrerGrand();   // le mode choisi reste : chaque repos s'ouvre en grand
   majRepos(); majGrand(true); prevenirSW();
 }
 // Le plan aussi : exoGrand dépend de minu (« OK », « Passer », arrêt de fin d'exercice ne passent pas par dessiner).
@@ -1959,7 +1943,7 @@ async function relireMontre() {
 
 // ───────────────────────────────────────── appli montre
 
-// Le plan du jour pour l'appli de la montre : les séries qui restent, dans l'ordre exact où le grand format
+// Le plan du jour pour l'appli de la montre : les séries qui restent, dans l'ordre exact où la vue Exercice
 // les enchaînerait, avec le repos qui suit chacune. Calculé en « faisant » chaque série sur une copie de
 // l'état (noterSerie + suiteApres, les mêmes décisions que validerSerie), puis l'état est remis tel quel :
 // ni enregistrement, ni repos, ni vibration, ni message.
@@ -2084,7 +2068,7 @@ function appliquerGeste(brut) {
     case "plus1": fait = uneSerieDePlus(m.nom); break;
     case "exo": {
       // Seulement si le carnet propose le même exercice que la montre, et hors enchaînement de superset (pas de
-      // flèches au grand format). Un repos qui court encore ici : la montre, qui n'en a plus, est recalée (état
+      // flèches de la vue Exercice). Un repos qui court encore ici : la montre, qui n'en a plus, est recalée (état
       // complet). Repos fini qui attend « Go », ou écran de fin d'exercice (mode "fin") : « Go » puis la flèche,
       // comme au téléphone. Sans effet visible : ignoré.
       if (minu?.mode === "superset") break;
@@ -2299,14 +2283,14 @@ function appliquerAppui(a, autres = new Map(), { duJourSur = false } = {}) {
 // Le repos du téléphone calé sur celui de la montre (fin = ts + repos) ; déjà passé, ou sans repos : aucun.
 // minu.appli : pas de fin annoncée au service worker (prevenirSW), la montre vibre elle-même.
 // Un minuteur lancé au téléphone après l'appui (debut, ou fin − durée pour un minuteur gardé d'avant) est plus
-// récent : il reste tel quel, avec sa notification. Sans repos en cours, l'exercice ouvert est celui que le
-// grand format proposerait à la fin du repos de l'appui (le partenaire d'un superset, comme le bouton « go »).
+// récent : il reste tel quel, avec sa notification. Sans repos en cours, l'exercice ouvert est celui que la
+// vue Exercice proposerait à la fin du repos de l'appui (le partenaire d'un superset, comme le bouton « go »).
 // minu.appui : l'id de l'appui, pour qu'annulerAppui arrête ce repos-là. Par le pont : `ts`, l'heure du geste
 // (ms), fait le début et la fin du repos ; `effort` pose la question de la réserve (comme validerSerie).
 function reposDepuisAppli(a, { ts, effort = false } = {}) {
   const t = ts ?? a.ts * 1000;
   if (minu && !minu.appli && (minu.debut ?? minu.fin - minu.duree * 1000) > t) return;
-  ouvert = a.nom;
+  ouvert = a.nom; exoChoisi = null;
   // Par le pont, la fin déjà passée n'est jugée qu'après le lot de gestes (recevoirUneFois, reposDuLot).
   const fin = ts == null ? finReposAppui(a, Date.now()) : a.repos ? ts + a.repos * 1000 : null;
   if (!fin) {
@@ -2341,20 +2325,21 @@ function journaliserMontre(quoi) {
 }
 
 function majRepos() {
-  const el = $("#minuteur");
+  // Vue Exercice à l'écran : le repos s'y vit en plein, le panneau du bas reste caché (mais la fin sonne d'ici).
+  const el = $("#minuteur"), classe = (c) => { el.className = grandVu ? "minuteur" : c; };
   if (!minu) { el.className = "minuteur"; return; }
   $("#min-quoi").textContent = minu.quoi;
   majEffort();
   $("#min-cible").textContent = minu.cible || "";
   if (minu.mode === "superset") {
-    el.className = "minuteur actif";
+    classe("minuteur actif");
     $("#chrono").textContent = "⚡";
     $("#min-jauge").style.width = "0";
     boutons(`<button data-min="repos-seul">Sans superset</button><span></span><button data-min="stop" class="fort">OK</button>`);
     return;
   }
   if (minu.mode === "fin") {
-    el.className = "minuteur actif";
+    classe("minuteur actif");
     $("#chrono").textContent = "";
     $("#min-jauge").style.width = "0";
     boutons(`<button data-min="repos2" class="fort">Repos 2:00</button><button data-min="repos1">1:30</button><span></span><button data-min="stop">OK</button>`);
@@ -2364,7 +2349,8 @@ function majRepos() {
   const v = Math.round(Math.abs(reste));
   $("#chrono").textContent = `${reste < 0 ? "+" : ""}${Math.floor(v / 60)}:${String(v % 60).padStart(2, "0")}`;
   $("#min-jauge").style.width = `${Math.max(0, Math.min(100, 100 * (1 - reste / minu.duree)))}%`;
-  el.className = `minuteur actif ${reste <= 0 ? "fini" : ""} ${minu.restant != null ? "pause" : ""}`;
+  // En vue Liste, le repos tient sur une ligne (compact) : l'exercice, le chrono, Passer ; le toucher mène à l'exercice.
+  classe(`minuteur actif compact ${reste <= 0 ? "fini" : ""} ${minu.restant != null ? "pause" : ""}`);
   boutons(`<button data-min="pause">${minu.restant != null ? "▶ Reprendre" : "⏸ Pause"}</button>`
     + `<button data-min="-15">−15 s</button><button data-min="15">+15 s</button>`
     + `<button data-min="stop" class="${reste <= 0 ? "fort" : ""}">${reste <= 0 ? "Go" : "Passer"}</button>`);
@@ -2441,7 +2427,7 @@ function bip() {
   } catch {}
 }
 
-// Les gestes du repos et du grand format, nommés : les boutons du téléphone et les gestes de la montre
+// Les gestes du repos et de la vue Exercice, nommés : les boutons du téléphone et les gestes de la montre
 // passent par les mêmes fonctions. Chacune rend true si elle a agi (false : geste sans objet, rien n'est fait)
 // et garde le minuteur (garder) quand elle le touche. ±15 s et pause ne servent qu'au repos (mode "repos").
 
@@ -2464,24 +2450,40 @@ function reprendreRepos(t = Date.now()) {
   minu.fin = Math.round(t + minu.restant * 1000); minu.restant = null;   // en ms entières (le restant est à virgule)
   garder(); return true;
 }
-// « Go » / « Passer » / « Sans repos » du grand format : le repos s'arrête, l'exercice proposé s'ouvre.
+// « Go » / « Passer » / « Sans repos » de la vue Exercice : le repos s'arrête, l'exercice proposé s'ouvre.
 function passerRepos() {
   if (minu?.mode !== "repos" && minu?.mode !== "fin") return false;
-  ouvert = exoGrand(); choisie = null; arreterRepos();
+  ouvert = exoGrand(); choisie = null; exoChoisi = null; arreterRepos();
   return true;
 }
-// Les flèches du grand format : l'exercice suivant (1) ou précédent (-1) de ceux qui ont encore des séries.
-function changerExo(sens) {
+// Les flèches de la vue Exercice : l'exercice suivant (1) ou précédent (-1) de ceux qui ont encore des séries,
+// depuis `depuis` (l'exercice proposé, celui de la montre ; au téléphone, celui affiché, qui peut être fini : alors
+// le premier après lui, ou avant lui, dans l'ordre de la séance). Le choix fait dans la Liste est oublié.
+function changerExo(sens, depuis = exoGrand()) {
   if (sens !== 1 && sens !== -1) return false;
-  const suite = exosAffiches(seanceDuJour()).filter(resteSeries), i = suite.indexOf(exoGrand());
+  const tous = exosAffiches(seanceDuJour()), suite = tous.filter(resteSeries), i = suite.indexOf(depuis);
   if (!suite.length) return false;
-  ouvert = suite[(i + (sens === 1 ? 1 : suite.length - 1)) % suite.length]; choisie = null;
+  exoChoisi = null;
+  if (i >= 0 || !tous.includes(depuis)) ouvert = suite[(i + (sens === 1 ? 1 : suite.length - 1)) % suite.length];
+  else {
+    const j = tous.indexOf(depuis), apres = suite.filter((n) => tous.indexOf(n) > j), avant = suite.filter((n) => tous.indexOf(n) < j);
+    ouvert = sens === 1 ? apres[0] ?? suite[0] : avant.at(-1) ?? suite.at(-1);
+  }
+  choisie = null;
   return true;
 }
 // « + une série » : une ligne prévue de plus pour l'exercice (le repos continue).
 function uneSerieDePlus(nom) {
   if (!nom || !exosAffiches(seanceDuJour()).includes(nom)) return false;
   lignesDe(nom).st.extra++;
+  return true;
+}
+// « + une série » sur un exercice fini montré pour être corrigé (vue Exercice, ou son menu ⋯) : hors repos, il repart
+// et devient l'exercice à faire.
+function plusDeFini(nom) {
+  const fini = !!nom && !resteSeries(nom);
+  if (!uneSerieDePlus(nom)) return false;
+  if (fini && !minu) ouvert = nom;
   return true;
 }
 // La réserve (0 à 4+) de la série i de l'exercice.
@@ -2552,15 +2554,15 @@ function clicMinuteur(ev) {
     return fait || garder();
   }
   const b = ev.target.closest("[data-min]");
+  if (!b && minu && $("#minuteur").classList.contains("compact")) { allerAuRepos(); dessiner(); return; }
   if (!b || !minu) return;
   const a = b.dataset.min;
-  if (a === "grand") return ouvrirGrand();
   if (a === "stop") return arreterRepos();
   if (a === "repos-seul") {   // débrancher le superset pour la séance et faire un repos normal
     const from = minu.ssFrom, partner = minu.nom;
     if (from && partner) couperSuperset(from, partner, true);
     lancerRepos(from || partner, `${from || partner} · repos`, "");
-    return envoyerPlanPont();   // ssOff a changé : bit superset et ordre des étapes (pas de dessiner() ici)
+    return envoyerPlanPont();   // ssOn a changé : bit superset et ordre des étapes (pas de dessiner() ici)
   }
   if (a === "repos2" || a === "repos1") {
     minu = { ...minu, mode: "repos", quoi: `Repos avant l'exercice suivant`, cible: "", duree: a === "repos2" ? 120 : 90, debut: Date.now() };
@@ -2572,37 +2574,56 @@ function clicMinuteur(ev) {
 }
 $("#minuteur").addEventListener("click", clicMinuteur);
 
-// ═══════════════════════════════════════════ Grand format
+// ═══════════════════════════════════════════ Vue Exercice
 
-// Facultatif : tout le menu de série en plein écran, pour le lire et le toucher dans une fenêtre réduite,
-// le carnet à côté d'une autre appli. Il s'ouvre du minuteur ou d'une carte, et le reste de repos en
-// repos tant qu'on ne l'a pas refermé (grandPref). Toute la fenêtre sert de jauge : elle se remplit
-// pendant le repos et clignote en vert à la fin, visible du coin de l'œil. Les boutons sont ceux de
-// l'appli (data-pm, data-cocher, data-effort, data-min) : une série notée ici est une série comme une autre.
-// Quatre états : repos, fini (le repos est écoulé), serie (à faire, réglage et validation), fin (dernier exercice
-// de la séance). Entre deux exercices, pas d'arrêt : finExercice lance le repos et l'écran passe au suivant.
-const ICONE = (d) => `<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${d}"/></svg>`;
-const ICONE_AGRANDIR = ICONE("M9 3H3v6M15 3h6v6M9 21H3v-6M15 21h6v-6");
-const ICONE_REDUIRE = ICONE("M3 9h6V3M21 9h-6V3M3 15h6v6M21 15h-6v6");
+// L'écran principal de la séance : un exercice à la fois, toute la page au-dessus de la barre d'onglets. Elle
+// s'affiche dès qu'il reste une série à faire (ou qu'un repos est en cours) et que la vue choisie est « exercice » ;
+// le bouton ☰ mène à la Liste des cartes, le titre d'une carte en revient. Pensée aussi pour une fenêtre réduite :
+// toute la page sert de jauge, elle se remplit pendant le repos et clignote en vert à la fin, visible du coin de
+// l'œil. Les boutons sont ceux de l'appli (data-pm, data-cocher, data-effort, data-min) : une série notée ici est
+// une série comme une autre. Quatre états : repos, fini (le repos est écoulé), serie (à faire, réglage et
+// validation), fin (dernier exercice de la séance). Entre deux exercices, pas d'arrêt : finExercice lance le
+// repos et l'écran passe au suivant.
 
-function montrerGrand() {
-  if (grandVu) return;
-  grandVu = true;
-  // Le geste « retour » du téléphone referme le grand format au lieu de quitter l'appli.
-  if (!history.state?.grand) history.pushState({ grand: 1 }, "");
+// La vue Exercice est à l'écran : onglet Séance, vue « exercice », une clé posée (sinon l'accueil la demande), et
+// quelque chose à y faire : une série, ou un repos (ou une fin d'exercice) en cours. Un jour excusé montre la Liste.
+function vueExercice() {
+  if (onglet !== "seance" || vue !== "exercice" || !cle) return false;
+  if (minu) return true;
+  return !seanceDuJour().excuse && !!exoAffiche();
 }
-function ouvrirGrand() {
-  grandPref = true; ecrire("carnet:grand", true);
-  montrerGrand(); ecranAllume(); majGrand(true);
+// L'exercice montré : celui touché dans la Liste s'il est fini (on vient le revoir ou le corriger) et que rien n'en
+// impose un autre (repos, enchaînement de superset) ; sinon celui à faire (exoGrand, que suit aussi la montre).
+function exoAffiche() {
+  if (exoChoisi && !minu && exosAffiches(seanceDuJour()).includes(exoChoisi) && !resteSeries(exoChoisi)) return exoChoisi;
+  return exoGrand();
 }
-function fermerGrand() {
-  grandPref = false; ecrire("carnet:grand", false); grandVu = false;
-  if (history.state?.grand) history.back();
-  dessiner();
+// Un exercice touché (carte de la Liste, ajout) : il devient l'exercice à faire seulement s'il lui reste des séries ;
+// fini, il est montré pour être corrigé sans déplacer l'exercice à faire (ni le plan de la montre). Pendant un repos
+// (ou un enchaînement), l'écran du repos s'impose et rien n'est retenu : le choix ressortirait après « Go ».
+function allerExercice(nom) {
+  exoChoisi = minu ? null : nom;
+  if (!minu && resteSeries(nom)) ouvert = nom;
+  vue = "exercice"; ecrire("carnet:vue", { vue, jour });
 }
-addEventListener("popstate", () => {
-  if (grandVu && !history.state?.grand) { grandPref = false; ecrire("carnet:grand", false); grandVu = false; dessiner(); }
-});
+// La ligne de repos des autres onglets (et de la Liste) : l'écran du repos, dans l'onglet Séance.
+function allerAuRepos() {
+  if (onglet !== "seance") { onglet = "seance"; window.scrollTo(0, 0); }
+  allerExercice(minu.nom);
+}
+function allerListe() { vue = "liste"; exoChoisi = null; ecrire("carnet:vue", { vue, jour }); }
+// ☰ et « Voir la séance » : l'entrée d'historique de la vue Exercice est retirée (history.back), et c'est son popstate
+// qui mène à la Liste ; sans elle, directement.
+function quitterExercice() {
+  if (history.state?.exercice) history.back();
+  else { allerListe(); dessiner(); }
+}
+// Le geste « retour » du téléphone ramène de la vue Exercice à la Liste au lieu de quitter l'appli : dessiner()
+// pose une entrée { exercice: 1 } dès que la vue est à l'écran. Sur un autre onglet, le retour ne change pas la vue.
+function retourHistorique() {
+  if (onglet === "seance" && grandVu && !history.state?.exercice) { allerListe(); dessiner(); }
+}
+addEventListener("popstate", retourHistorique);
 
 const resteSeries = (nom) => lignesDe(nom).L.some((l) => !l.fait);
 // L'exercice à faire ensuite : le partenaire d'un superset après le repos de la paire, sinon celui en
@@ -2629,19 +2650,40 @@ function aFaire(nom) {
 }
 const cibleTxt = (nom) => { const { l, mode } = aFaire(nom); return !l ? "" : mode === "charge" ? `${kg(l.c)} kg × ${l.r}` : serieTxt(nom, l.c, l.r); };
 
+// La valeur d'un réglage, à taper au clavier entre ses − / + : data-champ la branche sur l'écouteur « change » (la
+// ligne .ls donne l'exercice et la série). Charge vide = poids du corps.
+const champValeur = (champ, l, mode) => champ === "c"
+  ? `<input data-champ="c" inputmode="decimal" enterkeyhint="done" value="${l.c ? kg(l.c) : ""}" placeholder="pdc" aria-label="charge en kg">`
+  : `<input data-champ="r" inputmode="numeric" enterkeyhint="done" value="${l.r}" aria-label="${mode === "duree" ? "secondes" : "répétitions"}">`;
+// Un champ data-champ dans el a le doigt (clavier ouvert) : el n'est pas réécrit, la saisie serait perdue.
+const saisieDans = (el) => { const a = document.activeElement; return !!a?.dataset?.champ && !!el.contains(a); };
+
 // Les − / + de la prochaine série : .ls et data-ligne les branchent sur les mêmes gestes que la carte.
 function reglageGrand(nom) {
   const { l, ech, mode, pas } = aFaire(nom);
   if (!l) return "";
-  const pm = (champ, val, unite, pasTxt) => `<div class="g-pm"><button data-pm="${champ}" data-d="-1" aria-label="moins ${pasTxt}">−</button>
-    <span class="g-val"><b>${val}</b><small>${unite}</small></span><button data-pm="${champ}" data-d="1" aria-label="plus ${pasTxt}">+</button></div>`;
+  const pm = (champ, unite, pasTxt) => `<div class="g-pm"><button data-pm="${champ}" data-d="-1" aria-label="moins ${pasTxt}">−</button>
+    <span class="g-val">${champValeur(champ, l, mode)}<small>${unite}</small></span><button data-pm="${champ}" data-d="1" aria-label="plus ${pasTxt}">+</button></div>`;
   return `<div class="ls g-ligne" data-ligne="${l.k}" data-nom="${esc(nom)}" ${ech ? 'data-ech="1"' : ""}>
-    ${mode === "charge" ? pm("c", kg(l.c), "kg", `${kg(pas)} kg`) : ""}${pm("r", l.r, mode === "duree" ? "s" : "rép.", mode === "duree" ? "5 secondes" : "une répétition")}</div>`;
+    ${mode === "charge" ? pm("c", "kg", `${kg(pas)} kg`) : ""}${pm("r", mode === "duree" ? "s" : "rép.", mode === "duree" ? "5 secondes" : "une répétition")}</div>`;
+}
+
+// Les pastilles des séries de l'exercice, échauffements d'abord : faite (fond vert, « 52×6 », « @2 » si la réserve
+// est notée), prochaine (entourée), prévue (pointillés). La tâche qui suit les branche (data-pastille).
+function pastillesGrand(nom, compact = false) {
+  const { L, W, k0 } = lignesDe(nom), k0e = W.findIndex((w) => !w.fait), ech = k0e >= 0;
+  const p = (l, e) => {
+    const cls = l.fait ? "fait" : (e ? l.k === k0e : !ech && l.k === k0) ? "prochaine" : "prevue";
+    const res = !e && l.fait && l.e != null ? `<small>@${l.e === 4 ? "4+" : l.e}</small>` : "";
+    return `<button class="${cls}" data-pastille="${l.k}" data-pn="${esc(nom)}" ${e ? 'data-ech="1"' : ""} aria-label="${e ? "Échauffement" : `Série ${l.k + 1}`}">${e ? "é " : ""}${serieTxt(nom, l.c, l.r)}${res}</button>`;
+  };
+  return `<div class="g-pastilles${compact ? " compact" : ""}">${W.map((l) => p(l, true)).join("")}${L.map((l) => p(l, false)).join("")}</div>`;
 }
 
 function corpsGrand(etat) {
-  const reduire = `<button class="g-reduire" data-g="fermer" aria-label="Revenir à l'affichage normal">${ICONE_REDUIRE}</button>`;
-  const nom = exoGrand(), s = seanceDuJour();
+  const nom = exoAffiche(), s = seanceDuJour();
+  // ☰ : la Liste des exercices ; ⋯ : les actions de l'exercice (au repos, de celui annoncé ensuite).
+  const outils = `<div class="g-outils"><button data-g="liste" aria-label="Liste des exercices">☰</button><button data-g="menu" aria-label="Actions de l'exercice">⋯</button></div>`;
   const ef = minu?.effort, x = ef ? s.exos.find((e) => e.nom === ef.nom)?.series?.[ef.i] : null;
   const zone = (avecReglage) => {
     const qr = x ? questionReserve(x, ef) : null;
@@ -2651,30 +2693,45 @@ function corpsGrand(etat) {
   };
 
   if (etat === "serie") {
-    if (!nom) return `<div class="g-tete"><div class="g-titre"><b>Séance terminée</b></div>${reduire}</div>
+    if (!nom) return `<div class="g-tete"><div class="g-titre"><b>Séance terminée</b></div></div>
       <div class="g-milieu"><div class="g-bravo">✓</div></div>
-      <div class="g-actions"><button class="g-principal" data-g="fermer">Revenir au carnet</button></div>`;
-    const { L, n, k0 } = lignesDe(nom), { ech } = aFaire(nom);
-    const faites = L.filter((l) => l.fait).map((l) => `<span>${serieTxt(nom, l.c, l.r)}${l.e != null ? `<small>@${l.e === 4 ? "4+" : l.e}</small>` : ""}</span>`).join("");
-    const suite = exosAffiches(s).filter(resteSeries);
+      <div class="g-actions"><button class="g-principal" data-g="liste">Voir la séance</button></div>`;
+    const { k0, der, ci } = lignesDe(nom), { ech } = aFaire(nom);
+    const tous = exosAffiches(s), suite = tous.filter(resteSeries);
     const ss = minu?.mode === "superset";
-    const fl = (g, c) => (suite.length > 1 && !ss ? `<button class="g-fleche" data-g="${g}" aria-label="${g === "prec" ? "Exercice précédent" : "Exercice suivant"}">${c}</button>` : "");
-    const mm = memo(nom);
+    // Fini : l'exercice touché dans la Liste pour être revu ou corrigé (exoAffiche) ; il n'est plus dans la suite.
+    const fini = !suite.includes(nom), autre = suite.some((n) => n !== nom);
+    const fl = (g, c) => (autre && !ss ? `<button class="g-fleche" data-g="${g}" aria-label="${g === "prec" ? "Exercice précédent" : "Exercice suivant"}">${c}</button>` : "");
+    const groupe = groupeDe(nom), rec = ctx?.records?.[nom], mm = memo(nom);
+    const hp = horsProg(s, s.exos.find((e) => e.nom === nom));
+    const infos = [
+      `<div>${der ? `la dernière fois : ${esc(formatSeries(der.series))} · ${jj(der.jour)}` : "pas encore d'historique"}</div>`,
+      hp ? `<div class="g-info">→ aujourd'hui ne compte pas : la cible reste celle de la dernière fois</div>`
+        : ci ? `<div class="g-info ${ci.decharge ? "decharge" : ""}">→ ${esc(ci.texte)}</div>` : "",
+      rec?.charge ? `<div class="g-record">record ${kg(rec.charge)} kg</div>` : rec?.reps ? `<div class="g-record">record ${rec.reps} reps</div>` : "",
+      mm ? `<div class="g-memo">📌 ${esc(mm)}</div>` : "",
+    ].join("");
     return `<div class="g-tete">${fl("prec", "‹")}<div class="g-titre"><b>${esc(nom)}</b>
-        <span>${ss ? "⚡ superset, sans repos · " : ""}${ech ? "échauffement" : `série ${k0 + 1}/${Math.max(n, L.length)}`}${mm ? ` · ${esc(mm)}` : ""}</span></div>${fl("suiv", "›")}${reduire}</div>
-      <div class="g-milieu">${reglageGrand(nom)}${faites ? `<div class="g-faites">${faites}</div>` : ""}</div>
+        <span>${ss ? "⚡ superset, sans repos · " : ""}exercice ${tous.indexOf(nom) + 1} sur ${tous.length}${groupe ? ` · ${esc(groupe)}` : ""}${fini ? " · terminé ✓" : ""}</span></div>${fl("suiv", "›")}${outils}</div>
+      <div class="g-infos">${infos}</div>
+      ${pastillesGrand(nom)}
+      ${fini ? `<div class="g-milieu"></div>
+      <div class="g-actions">${autre ? `<button class="g-second" data-g="suiv">Exercice suivant ›</button>` : ""}
+        <button class="g-principal" data-g="une-de-plus">+ une série</button></div>` : `<div class="g-milieu">${reglageGrand(nom)}</div>
       ${ss ? zone(false) : ""}
       <div class="g-actions">${ss ? `<button class="g-second" data-min="repos-seul">Sans superset</button>` : ""}
-        <button class="g-principal" ${ech ? "data-cocher-ech" : "data-cocher"}>${ech ? "Échauffement fait" : "Série faite"}</button></div>`;
+        <button class="g-principal" ${ech ? "data-cocher-ech" : "data-cocher"}>${ech ? "Échauffement fait" : `Série ${k0 + 1} faite`}</button></div>`}`;
   }
   if (etat === "fin" && !nom) {
-    return `<div class="g-tete"><div class="g-titre"><b>${esc(minu.nom)}</b><span>dernier exercice de la séance</span></div>${reduire}</div>
+    return `<div class="g-tete"><div class="g-titre"><b>${esc(minu.nom)}</b><span>dernier exercice de la séance</span></div>${outils}</div>
+      ${pastillesGrand(minu.nom, true)}
       <div class="g-milieu"><div class="g-bravo">✓</div></div>
       ${zone(false)}
       <div class="g-actions"><button class="g-principal" data-g="go">Terminer</button></div>`;
   }
   if (etat === "fin") {
-    return `<div class="g-tete"><div class="g-titre"><b>${esc(minu.nom)}</b><span>exercice terminé</span></div>${reduire}</div>
+    return `<div class="g-tete"><div class="g-titre"><b>${esc(minu.nom)}</b><span>exercice terminé</span></div>${outils}</div>
+      ${pastillesGrand(minu.nom, true)}
       <div class="g-milieu"><div class="g-bravo">✓</div><div class="g-ensuite">Ensuite : <b>${esc(nom)}</b></div></div>
       ${zone(false)}
       <div class="g-actions g-trois"><button class="g-principal" data-min="repos2">Repos 2:00</button><button class="g-second" data-min="repos1">1:30</button>
@@ -2687,7 +2744,8 @@ function corpsGrand(etat) {
     : `Ensuite : ${memeExo ? "" : `${esc(nom)} · `}<b>${esc(cibleTxt(nom))}</b>`;
   const etatRepos = etat === "fini" ? "repos terminé" : minu.restant != null ? "repos en pause" : "repos";
   const sous = change ? [`exercice suivant · ${cibleTxt(nom)}`, memo(nom)].filter(Boolean).join(" · ") : etatRepos;
-  const tete = `<div class="g-tete"><div class="g-titre"><b>${esc(change ? nom : minu.nom)}</b><span>${esc(sous)}</span></div>${reduire}</div>
+  const tete = `<div class="g-tete"><div class="g-titre"><b>${esc(change ? nom : minu.nom)}</b><span>${esc(sous)}</span></div>${outils}</div>
+    ${pastillesGrand(minu.nom, true)}
     <div class="g-milieu"><div class="g-chrono" id="g-chrono"></div><div class="g-ensuite">${ensuite}</div>
       ${change ? `<button class="g-lien" data-g="plus">+ une série de ${esc(minu.nom)}</button>` : ""}</div>`;
   if (etat === "fini") return `${tete}${zone(false)}<div class="g-actions"><button class="g-go" data-g="go">Go</button></div>`;
@@ -2706,9 +2764,17 @@ function majGrand(complet = false) {
   const pause = minu?.restant != null;
   const signe = `${etat} ${pause ? "pause" : ""}`;
   if (complet || signe !== grandEtat) {
+    const autreEtat = signe !== grandEtat;
     grandEtat = signe;
-    const html = corpsGrand(etat), c = $("#g-corps"), nom = exoGrand();
-    if (c.dataset.html !== html) { c.innerHTML = html; c.dataset.html = html; }
+    const html = corpsGrand(etat), c = $("#g-corps"), nom = exoAffiche();
+    // Une valeur en cours de saisie n'est pas effacée par un redessin venu d'ailleurs (la montre, la base) ; un
+    // changement d'état (série notée, repos fini) réécrit quand même.
+    if (c.dataset.html !== html && (autreEtat || !saisieDans(c))) {
+      c.innerHTML = html; c.dataset.html = html;
+      // Pastilles sur une ligne qui défile (fenêtre basse) : la prochaine série (ou la dernière faite) à l'écran.
+      const p = c.querySelector(".g-pastilles"), x = p && (p.querySelector(".prochaine") || [...p.querySelectorAll(".fait")].at(-1));
+      if (x && p.scrollWidth > p.clientWidth) p.scrollLeft = Math.max(0, x.offsetLeft - p.offsetLeft - 48);
+    }
     if (nom) c.dataset.exo = nom; else delete c.dataset.exo;
   }
   el.className = `ouvert ${signe} ${reste != null && reste > 0 && reste <= 10 ? "bientot" : ""} ${reste != null && reste < -90 ? "calme" : ""}`;
@@ -2719,13 +2785,162 @@ function majGrand(complet = false) {
 
 function clicGrand(ev) {
   const g = ev.target.closest("[data-g]")?.dataset.g;
-  if (g === "fermer") return fermerGrand();
+  if (g === "liste") return quitterExercice();
+  if (g === "une-de-plus") { plusDeFini(exoAffiche()); return dessiner(); }
+  // ⋯ : l'exercice affiché ; au repos, celui annoncé ensuite (exoAffiche), sinon celui qui vient de finir.
+  if (g === "menu") { const nom = exoAffiche() || minu?.nom; if (nom) ouvrirFeuille(menuExo(nom), { quoi: "menu", nom }); return; }
+  const pastille = ev.target.closest("[data-pastille]");
+  if (pastille?.dataset.pastille != null) {
+    const nom = pastille.dataset.pn || exoAffiche(), k = Number(pastille.dataset.pastille), ech = !!pastille.dataset.ech;
+    if (nom) ouvrirFeuille(feuilleSerie(nom, k, ech), { quoi: "serie", nom, k, ech });
+    return;
+  }
   if (g === "go") { passerRepos(); return dessiner(); }
   if (g === "plus") { uneSerieDePlus(minu?.nom); return dessiner(); }   // on reste sur l'exercice, le repos continue
-  if (g === "prec" || g === "suiv") { changerExo(g === "suiv" ? 1 : -1); return dessiner(); }
+  if (g === "prec" || g === "suiv") { changerExo(g === "suiv" ? 1 : -1, exoAffiche()); return dessiner(); }
   clicMinuteur(ev);
 }
 $("#grand").addEventListener("click", clicGrand);
+
+// ───────────────────────────────────────── Feuilles du bas
+// Une pastille de la vue Exercice ouvre sa série pour la corriger (feuille « série »), « ⋯ » les actions de
+// l'exercice (feuille « menu »). C'est un <dialog> modal : au-dessus de la barre d'onglets et de la vue Exercice,
+// le fond touché la ferme. Les boutons gardent les attributs des cartes (data-pm, data-plus-serie…) : le gestionnaire
+// de clics global les traite, la racine data-exo lui donne l'exercice.
+const nomDeSerie = (k, ech) => (ech ? `Échauffement ${k + 1}` : `Série ${k + 1}`);
+
+function feuilleSerie(nom, k, ech) {
+  const { L, W, mode, pas } = lignesDe(nom), l = (ech ? W : L).find((x) => x.k === k);
+  if (!l) return "";
+  const pm = (champ, lib, unite, pasTxt) => `<div class="f-reglage"><span class="f-lib">${lib}</span><div class="f-pm">
+    <button data-pm="${champ}" data-d="-1" aria-label="moins ${pasTxt}">−</button><span class="f-val">${champValeur(champ, l, mode)}<small>${unite}</small></span>
+    <button data-pm="${champ}" data-d="1" aria-label="plus ${pasTxt}">+</button></div></div>`;
+  const reglages = (mode === "charge" ? pm("c", "Charge", "kg", `${kg(pas)} kg`) : "")
+    + pm("r", mode === "duree" ? "Durée" : "Répétitions", mode === "duree" ? "s" : "rép.", mode === "duree" ? "5 secondes" : "une répétition");
+  // La réserve et le retrait n'ont de sens que pour une série déjà faite (l'échauffement n'a pas de réserve).
+  const reserve = l.fait && !ech && mode === "charge"
+    ? `<div class="f-reglage"><span class="f-lib">Réserve</span><div class="f-reserve">${[0, 1, 2, 3, 4].map((i) =>
+      `<button data-f-reserve="${i}" class="${l.e === i ? "choisi" : ""}">${i === 4 ? "4+" : i}</button>`).join("")}</div></div>` : "";
+  const retirer = l.fait ? `<button class="f-ligne danger" data-f-retirer>${ech ? "Retirer l'échauffement" : "Retirer la série"}</button>` : "";
+  return `<div data-exo="${esc(nom)}"><div class="f-tete"><b>${nomDeSerie(k, ech)}</b><span>${esc(nom)} · ${l.fait ? "faite" : "prévue"}</span></div>
+    <div class="ls f-ls" data-ligne="${k}" data-nom="${esc(nom)}" ${ech ? 'data-ech="1"' : ""}>${reglages}</div>${reserve}${retirer}</div>`;
+}
+
+function menuExo(nom) {
+  const e = seanceDuJour().exos.find((x) => x.nom === nom), part = partenaireSuperset(nom), { mode } = lignesDe(nom);
+  const ligne = (attr, texte, plus = "") => `<button class="f-ligne" ${attr}>${texte}${plus}</button>`;
+  const caseA = (on) => `<span class="f-case ${on ? "on" : ""}" aria-hidden="true">${on ? "✓" : ""}</span>`;
+  return `<div data-exo="${esc(nom)}"><div class="f-tete"><b>${esc(nom)}</b><span>actions de l'exercice</span></div>
+    ${FICHES[nom] ? ligne(`data-fiche="${esc(nom)}"`, "Fiche de l'exercice") : ""}
+    ${ligne(`data-memo="${esc(nom)}"`, "Mémo de réglage")}
+    ${ligne("data-f-note", "Note sur l'exercice")}
+    ${ligne("data-plus-serie", "+ une série")}
+    ${mode === "charge" ? ligne("data-plus-ech", "+ échauffement") : ""}
+    ${ligne("data-remplacer", "Remplacer l'exercice")}
+    ${part ? ligne(`data-superset="${esc(nom)}"`, `Superset avec ${esc(part)}`, caseA(ssActif(nom))) : ""}
+    ${mode !== "charge" ? ligne(`data-mesure="${mode === "duree" ? "reps" : "duree"}"`, mode === "duree" ? "Compter en répétitions" : "Compter en secondes") : ""}
+    ${seanceDuJour().hp ? "" : ligne("data-hp", "Hors progression", caseA(!!e?.hp))}</div>`;
+}
+
+// Mémo et note : un champ dans la feuille, « OK » enregistre et revient au menu.
+function feuilleChamp(quoi, nom) {
+  const memoQ = quoi === "memo", e = seanceDuJour().exos.find((x) => x.nom === nom);
+  return `<div data-exo="${esc(nom)}"><div class="f-tete"><b>${memoQ ? "Mémo de réglage" : "Note sur l'exercice"}</b><span>${esc(nom)}</span></div>
+    <div class="f-champ"><input id="${memoQ ? "memo-champ" : "note-champ"}" value="${esc(memoQ ? memo(nom) : e?.note || "")}"
+      placeholder="${memoQ ? "cran 15 · siège 3 · prise large…" : "une remarque pour aujourd'hui"}" enterkeyhint="done">
+      <button class="f-ok" ${memoQ ? "data-memo-ok" : "data-note-ok"}>OK</button></div></div>`;
+}
+
+const htmlFeuille = (f) => f.quoi === "serie" ? feuilleSerie(f.nom, f.k, f.ech) : f.quoi === "menu" ? menuExo(f.nom) : feuilleChamp(f.quoi, f.nom);
+
+function ouvrirFeuille(html, sujet = feuilleOuverte) {
+  feuilleOuverte = sujet;
+  $("#feuille-corps").innerHTML = feuilleHtml = html;
+  const dlg = $("#feuille");
+  if (!dlg.open) dlg.showModal();
+}
+function fermerFeuille() {
+  feuilleOuverte = null; feuilleHtml = "";
+  const dlg = $("#feuille");
+  if (dlg.open) dlg.close();
+}
+// Après chaque geste : la feuille ouverte se redessine sur son sujet (une valeur changée, une case cochée) ; si son
+// sujet a disparu (série retirée, exercice remplacé), elle se ferme. Un champ en cours de saisie n'est pas réécrit.
+function majFeuille() {
+  if (!feuilleOuverte) return;
+  const html = htmlFeuille(feuilleOuverte);
+  if (!html) return fermerFeuille();
+  if (html !== feuilleHtml && !saisieDans($("#feuille-corps"))) $("#feuille-corps").innerHTML = feuilleHtml = html;
+}
+$("#feuille").addEventListener("click", (ev) => { if (ev.target.id === "feuille") fermerFeuille(); });
+$("#feuille").addEventListener("close", () => { feuilleOuverte = null; feuilleHtml = ""; });   // Échap, retour
+
+// Le geste « retour » d'Android, dans l'APK : MainActivity appelle carnetRetour() avant toute chose. Un niveau à la
+// fois, et le geste s'arrête là (true) : un sous-menu ouvert (feuille d'une série, menu ⋯, fiche « i », ajout d'un
+// exercice) se referme ; puis la vue Exercice, sous-menu de la Liste, ramène à la Liste. Sinon (false : la Liste ou
+// un autre onglet), l'appli passe en arrière-plan, comme un retour au menu des applis, sans se fermer : on la
+// retrouve sur le même écran. Dans Chrome, le retour reste celui du navigateur (historique de la vue Exercice).
+window.carnetRetour = () => {
+  if (feuilleOuverte) { fermerFeuille(); return true; }
+  for (const id of ["#fiche", "#ajout"]) if ($(id).open) { $(id).close(); return true; }
+  if (onglet === "seance" && grandVu) { quitterExercice(); return true; }
+  return false;
+};
+
+// Les gestes propres aux feuilles. Rend true quand le geste est fini (la feuille est redessinée), false pour laisser
+// le gestionnaire des cartes le traiter (− / +, + une série, hors progression…).
+function clicFeuille(t, nom) {
+  const f = feuilleOuverte, s = seanceDuJour();
+  if (t.hasAttribute("data-f-reserve")) {
+    const x = s.exos.find((z) => z.nom === nom)?.series?.[f?.k], i = Number(t.dataset.fReserve);
+    if (x && x.e === i) { delete x.e; sauver(); } else noterReserve(nom, f?.k, i);   // retoucher la même réserve l'efface
+  } else if (t.hasAttribute("data-f-retirer")) {
+    if (f?.ech) {
+      const e = s.exos.find((x) => x.nom === nom);
+      if (e?.ech?.[f.k]) { e.ech.splice(f.k, 1); lignesDe(nom).st.echEdits = {}; if (!e.ech.length) delete e.ech; sauver(); }
+    } else retirerSerie(nom, f?.k);
+    fermerFeuille();
+  } else if (t.hasAttribute("data-memo")) {
+    feuilleOuverte = { quoi: "memo", nom }; majFeuille();
+    setTimeout(() => $("#memo-champ")?.focus(), 0); return true;
+  } else if (t.hasAttribute("data-f-note")) {
+    feuilleOuverte = { quoi: "note", nom }; majFeuille();
+    setTimeout(() => $("#note-champ")?.focus(), 0); return true;
+  } else if (t.hasAttribute("data-memo-ok")) {
+    const v = $("#memo-champ").value.trim().replace(/\|/g, "/");
+    ecrire(`carnet:memo:${nom}`, v);
+    s.memos = { ...(s.memos || {}), [nom]: v };   // part au PC avec la séance du jour
+    feuilleOuverte = { quoi: "menu", nom }; sauver();
+  } else if (t.hasAttribute("data-note-ok")) {
+    const v = $("#note-champ").value.trim();
+    let e = s.exos.find((x) => x.nom === nom);
+    if (!e && v) { e = { nom, series: [] }; s.exos.push(e); }
+    if (e) { if (v) e.note = v; else delete e.note; }
+    feuilleOuverte = { quoi: "menu", nom }; sauver();
+  } else if (t.dataset.superset) {
+    basculerSuperset(t.dataset.superset);   // la case du menu suit : la feuille se redessine sur son sujet
+  } else if (t.dataset.mesure) {
+    ecrire(`carnet:mesure:${nom}`, t.dataset.mesure); delete saisie[nom];
+  } else if (t.hasAttribute("data-plus-serie") || t.hasAttribute("data-plus-ech") || t.hasAttribute("data-remplacer") || t.dataset.fiche) {
+    fermerFeuille(); return false;   // l'action a lieu sur l'écran (ou dans son propre dialogue)
+  } else return false;
+  dessiner(); return true;
+}
+// Glisser horizontalement sur le haut de la vue (au moins 60 px, comme une série) : l'exercice suivant (vers la
+// gauche) ou précédent, comme ‹ ›, et seulement quand ils sont là.
+let glisseTete = null;
+$("#grand").addEventListener("touchstart", (ev) => {
+  const tete = ev.target.closest(".g-tete");
+  glisseTete = tete?.querySelector("[data-g=suiv]") ? { x: ev.touches[0].clientX, y: ev.touches[0].clientY } : null;
+}, { passive: true });
+$("#grand").addEventListener("touchend", (ev) => {
+  if (!glisseTete) return;
+  const dx = ev.changedTouches[0].clientX - glisseTete.x, dy = ev.changedTouches[0].clientY - glisseTete.y;
+  glisseTete = null;
+  if (Math.abs(dx) < 60 || Math.abs(dy) > Math.abs(dx)) return;
+  sansClic = Date.now();
+  if (changerExo(dx < 0 ? 1 : -1, exoAffiche())) dessiner();
+});
 
 // L'écran reste allumé pendant la séance (sinon il se verrouille entre deux séries).
 let verrou = null;

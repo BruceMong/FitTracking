@@ -252,6 +252,7 @@ export async function chargerCarnet({ maintenant = "2026-11-09T17:00:00+01:00", 
     history: { state: null, pushState() {}, replaceState() {}, back() {} },
     addEventListener() {},
     removeEventListener() {},
+    scrollTo() {},
     console,
     Response,
     URL,
@@ -318,6 +319,23 @@ export async function chargerCarnet({ maintenant = "2026-11-09T17:00:00+01:00", 
     visibilite(visible) {
       surDocument.hidden = !visible;
       for (const fn of ecouteursDoc.visibilitychange || []) fn({ type: "visibilitychange" });
+    },
+    // Un toucher sur un bouton : les écouteurs « click » du document le reçoivent (dataset = ses data-*). Avec
+    // `exo`, le bouton est dans la racine data-exo de cet exercice (carte ou feuille).
+    clic(dataset = {}, attributs = [], exo = null) {
+      const racine = exo ? { dataset: { exo } } : null;
+      const bouton = { dataset, hasAttribute: (a) => attributs.includes(a), matches: () => true,
+        closest: (sel) => (sel === "button, [data-ligne]" ? bouton : sel === "[data-exo]" ? racine : null) };
+      for (const fn of ecouteursDoc.click || []) fn({ target: { closest: (sel) => bouton.closest(sel) } });
+    },
+    // Une valeur tapée dans un champ data-champ (« c » ou « r ») de la ligne k de l'exercice, puis validée (le
+    // clavier fermé ou le champ quitté) : les écouteurs « change » du document la reçoivent. Rend le champ (flou :
+    // true s'il a été quitté par le code).
+    taper(nom, k, champ, valeur, ech = false) {
+      const ligne = { dataset: { nom, ligne: String(k), ...(ech ? { ech: "1" } : {}) } };
+      const el = { id: "", value: valeur, dataset: { champ }, flou: false, closest: (sel) => (sel === ".ls" ? ligne : null), blur() { el.flou = true; } };
+      for (const fn of ecouteursDoc.change || []) fn({ target: el });
+      return el;
     },
     lancerMinuteurs() {
       const enAttente = [...minuteurs.entries()];

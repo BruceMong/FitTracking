@@ -21,7 +21,11 @@ export const ctxPush = {
 };
 
 // Le stockage d'un téléphone qui a reçu le contexte du PC, plus d'autres clés.
-export const avecCtx = (plus = {}) => ({ "carnet:ctx": ctxPush, ...plus });
+// La paire triceps + élévations est désactivée par défaut dans le carnet ; les tests écrits paire active la
+// reçoivent par avecCtx, avecCtxSansSs() donne le stockage par défaut.
+export const SS_TRI_ELE = "Triceps poulie basse + Élévations latérales";
+export const avecCtx = (plus = {}) => ({ "carnet:ctx": ctxPush, "carnet:ss-on:2026-11-09": [SS_TRI_ELE], ...plus });
+export const avecCtxSansSs = (plus = {}) => ({ "carnet:ctx": ctxPush, ...plus });
 
 // La séance du jour déjà commencée au téléphone (entrée carnet:seance:2026-11-09).
 export const enCours = (series, plus = {}) => ({

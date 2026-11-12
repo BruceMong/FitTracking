@@ -561,7 +561,8 @@ test("pause (ts à virgule) puis reprise à la montre : la fin reste un nombre e
 
 test("exo sur l'écran de fin d'exercice (mode fin) : passer puis changer d'exercice, comme « fini »", async () => {
   const b = await carnet();
-  b.evaluer(`finExercice(${q(DC)})`);
+  // L'écran de fin d'exercice n'existe qu'en vue Liste : la vue Exercice enchaîne le repos de transition.
+  b.evaluer(`allerListe(); dessiner(); finExercice(${q(DC)})`);
   assert.deepEqual(b.json("[etatGrand(), exoGrand()]"), ["fin", DC]);
   assert.equal(b.json(`appliquerGeste(${q(geste(N, "exo", { nom: DC, sens: 1 }))})`), "applique");
   assert.equal(b.json("minu"), null);

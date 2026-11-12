@@ -179,5 +179,6 @@ test("les boutons du grand format passent par les mêmes fonctions", async () =>
   assert.equal(b.json("exoGrand()"), TRI);
   b.evaluer(`clicGrand(evt("[data-g]", "g", "prec"))`);
   assert.equal(b.json("exoGrand()"), DC);
-  assert.deepEqual(b.json("vus"), [["uneSerieDePlus", DC], ["passerRepos"], ["changerExo", 1], ["changerExo", -1]]);
+  assert.deepEqual(b.json("vus"), [["uneSerieDePlus", DC], ["passerRepos"], ["changerExo", 1, DC], ["changerExo", -1, TRI]]);
+  // (au téléphone, les flèches partent de l'exercice affiché : exoAffiche, qui peut être un exercice fini)
 });
