@@ -294,6 +294,7 @@
   .choix button.choisi small { color: rgba(255,255,255,.85); }
   .choix button:active { transform: scale(.96); }
   .version { text-align: center; font-size: 12px; color: var(--doux); padding: 16px 0 4px; }
+  .version button { font: inherit; color: var(--doux); background: none; border: none; padding: 8px 4px; text-decoration: underline; cursor: pointer; }
   /* Fiche : schémas dessinés (pictos.js), astuces et erreurs à éviter. */
   .f-pictos { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
   .f-pictos.n3 { grid-template-columns: 1fr 1fr 1fr; }
@@ -601,7 +602,7 @@
 </header>
 <div class="miniplayer" id="miniplayer"></div>
 <main id="app"></main>
-<div id="version" class="version"></div>
+<div class="version"><span id="version"></span> · <button type="button" id="maj">Mettre à jour</button></div>
 <input type="file" id="fichier-photo" accept="image/*" capture="environment" hidden>
 <input type="file" id="fichier-musique" accept="audio/*,.mp3" multiple hidden>
 <audio id="audio" preload="none"></audio>

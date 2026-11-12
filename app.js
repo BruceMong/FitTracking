@@ -3145,6 +3145,14 @@ if (pont) {
 }
 // Le numéro de version, en bas de page : pour vérifier que le téléphone a bien la dernière.
 caches?.keys?.().then((ks) => { const v = ks.find((k) => k.startsWith("fittracking-")); if (v) $("#version").textContent = `FitTracking ${v.slice(12)}`; }).catch(() => {});
+// Forcer la mise à jour : le carnet resté ouvert en fond garde la version chargée à son ouverture. On
+// demande la dernière au serveur puis on recharge (tout est déjà enregistré sur le téléphone, minuteur
+// compris) ; une nouvelle version recharge d'elle-même par controllerchange. Hors ligne : le cache.
+$("#maj").addEventListener("click", async (ev) => {
+  ev.currentTarget.textContent = "mise à jour…"; ev.currentTarget.disabled = true;
+  try { await (await navigator.serviceWorker?.getRegistration())?.update(); } catch {}
+  location.reload();
+});
 dessiner();
 if (cle) charger();
 recevoirPont();   // après charger : la réception attend sa lecture du serveur
