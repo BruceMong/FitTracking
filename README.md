@@ -82,7 +82,10 @@ service worker) pour noter ses séries au téléphone, à la salle, même sans r
 - Les courbes sont en SVG écrit à la main, sans bibliothèque, pour marcher hors ligne.
 - **Vue Exercice** (vue d'ouverture de la Séance ; c'était le « grand format » facultatif du 2026-11-06) : tout le menu de série en plein écran, pour le lire et le toucher dans
   une fenêtre réduite, à côté d'une autre appli. Reste active de repos en repos ; ☰ passe à la Liste, un toucher sur une carte
-  en revient (pendant un repos, sur l'écran du repos), comme la ligne de repos des autres onglets. Quatre états : `repos` (toute la fenêtre
+  en revient, comme la ligne de repos des autres onglets. Pendant un repos, la carte d'un autre exercice l'ouvre pour le revoir
+  ou le corriger (ses pastilles ouvrent chaque série : charge, répétitions, réserve), le repos continuant ; « Retour au repos »
+  (le chrono dedans) ramène à l'écran du repos, et le choix s'oublie avec ce repos (`consulte`, depuis le 2026-11-13 :
+  avant, toute carte touchée pendant un repos ramenait à l'écran du repos). Quatre états : `repos` (toute la fenêtre
   sert de jauge, verte dans les 10 dernières secondes), `fini` (clignote en vert à 1 Hz, fixe après 90 s ou si l'animation est
   réduite), `serie` (− / + et « Série faite »), `fin` (dernier exercice de la séance). Entre deux exercices, pas d'arrêt : à la dernière série, le
   repos de transition (2:00) part tout seul et l'écran annonce déjà le suivant, dans l'ordre du programme ; « + une série » reste sur

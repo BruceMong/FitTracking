@@ -2592,16 +2592,30 @@ function vueExercice() {
   if (minu) return true;
   return !seanceDuJour().excuse && !!exoAffiche();
 }
-// L'exercice montré : celui touché dans la Liste s'il est fini (on vient le revoir ou le corriger) et que rien n'en
-// impose un autre (repos, enchaînement de superset) ; sinon celui à faire (exoGrand, que suit aussi la montre).
+// L'exercice montré : celui touché dans la Liste pendant le repos (consultation) ; sinon celui touché dans la Liste
+// s'il est fini (on vient le revoir ou le corriger) et que rien n'en impose un autre (repos, enchaînement de
+// superset) ; sinon celui à faire (exoGrand, que suit aussi la montre).
 function exoAffiche() {
+  const vu = consultation();
+  if (vu) return vu;
   if (exoChoisi && !minu && exosAffiches(seanceDuJour()).includes(exoChoisi) && !resteSeries(exoChoisi)) return exoChoisi;
   return exoGrand();
 }
+// Pendant un repos (ou la fin d'un exercice), un autre exercice touché dans la Liste est montré pour être revu ou
+// corrigé (la machine d'avant, une réserve oubliée), le repos courant toujours : « Retour au repos » y ramène. Le
+// choix tient à ce repos-là, le même objet minu (pause et ±15 s le modifient en place) : « Go », la fin du repos ou un
+// nouveau repos ramènent à l'exercice à faire. Rien ne change pour le plan ni pour la montre.
+let consulte = null;
+function consultation() {
+  if (!consulte || consulte.minu !== minu || (minu?.mode !== "repos" && minu?.mode !== "fin")) return null;
+  return exosAffiches(seanceDuJour()).includes(consulte.nom) ? consulte.nom : null;
+}
 // Un exercice touché (carte de la Liste, ajout) : il devient l'exercice à faire seulement s'il lui reste des séries ;
-// fini, il est montré pour être corrigé sans déplacer l'exercice à faire (ni le plan de la montre). Pendant un repos
-// (ou un enchaînement), l'écran du repos s'impose et rien n'est retenu : le choix ressortirait après « Go ».
+// fini, il est montré pour être corrigé sans déplacer l'exercice à faire (ni le plan de la montre). Pendant un repos,
+// il est consulté (ci-dessus) et exoChoisi reste vide : le choix ressortirait après « Go ». Pendant un enchaînement
+// de superset, l'écran du superset s'impose.
 function allerExercice(nom) {
+  consulte = (minu?.mode === "repos" || minu?.mode === "fin") && nom !== minu.nom ? { nom, minu } : null;
   exoChoisi = minu ? null : nom;
   if (!minu && resteSeries(nom)) ouvert = nom;
   vue = "exercice"; ecrire("carnet:vue", { vue, jour });
@@ -2680,10 +2694,34 @@ function pastillesGrand(nom, compact = false) {
   return `<div class="g-pastilles${compact ? " compact" : ""}">${W.map((l) => p(l, true)).join("")}${L.map((l) => p(l, false)).join("")}</div>`;
 }
 
+// Les infos d'un exercice sous son titre : la dernière fois, la cible (ou « ne compte pas »), le record, le mémo.
+function infosGrand(nom, s) {
+  const { der, ci } = lignesDe(nom), rec = ctx?.records?.[nom], mm = memo(nom);
+  const hp = horsProg(s, s.exos.find((e) => e.nom === nom));
+  return [
+    `<div>${der ? `la dernière fois : ${esc(formatSeries(der.series))} · ${jj(der.jour)}` : "pas encore d'historique"}</div>`,
+    hp ? `<div class="g-info">→ aujourd'hui ne compte pas : la cible reste celle de la dernière fois</div>`
+      : ci ? `<div class="g-info ${ci.decharge ? "decharge" : ""}">→ ${esc(ci.texte)}</div>` : "",
+    rec?.charge ? `<div class="g-record">record ${kg(rec.charge)} kg</div>` : rec?.reps ? `<div class="g-record">record ${rec.reps} reps</div>` : "",
+    mm ? `<div class="g-memo">📌 ${esc(mm)}</div>` : "",
+  ].join("");
+}
+
 function corpsGrand(etat) {
   const nom = exoAffiche(), s = seanceDuJour();
   // ☰ : la Liste des exercices ; ⋯ : les actions de l'exercice (au repos, de celui annoncé ensuite).
   const outils = `<div class="g-outils"><button data-g="liste" aria-label="Liste des exercices">☰</button><button data-g="menu" aria-label="Actions de l'exercice">⋯</button></div>`;
+  // Un exercice consulté pendant le repos : ses séries à corriger (pastilles), et le retour au repos, chrono dedans.
+  if (consultation()) {
+    const tous = exosAffiches(s), groupe = groupeDe(nom), fini = !resteSeries(nom);
+    const retour = minu.mode === "repos" ? `Retour au repos <span id="g-chrono"></span>` : "Retour";
+    return `<div class="g-tete"><div class="g-titre"><b>${esc(nom)}</b>
+        <span>exercice ${tous.indexOf(nom) + 1} sur ${tous.length}${groupe ? ` · ${esc(groupe)}` : ""}${fini ? " · terminé ✓" : ""}</span></div>${outils}</div>
+      <div class="g-infos">${infosGrand(nom, s)}<div class="g-info">touche une série pour la corriger</div></div>
+      ${pastillesGrand(nom)}
+      <div class="g-milieu"></div>
+      <div class="g-actions"><button class="g-principal" data-g="repos">${retour}</button></div>`;
+  }
   const ef = minu?.effort, x = ef ? s.exos.find((e) => e.nom === ef.nom)?.series?.[ef.i] : null;
   const zone = (avecReglage) => {
     const qr = x ? questionReserve(x, ef) : null;
@@ -2696,21 +2734,13 @@ function corpsGrand(etat) {
     if (!nom) return `<div class="g-tete"><div class="g-titre"><b>Séance terminée</b></div></div>
       <div class="g-milieu"><div class="g-bravo">✓</div></div>
       <div class="g-actions"><button class="g-principal" data-g="liste">Voir la séance</button></div>`;
-    const { k0, der, ci } = lignesDe(nom), { ech } = aFaire(nom);
+    const { k0 } = lignesDe(nom), { ech } = aFaire(nom);
     const tous = exosAffiches(s), suite = tous.filter(resteSeries);
     const ss = minu?.mode === "superset";
     // Fini : l'exercice touché dans la Liste pour être revu ou corrigé (exoAffiche) ; il n'est plus dans la suite.
     const fini = !suite.includes(nom), autre = suite.some((n) => n !== nom);
     const fl = (g, c) => (autre && !ss ? `<button class="g-fleche" data-g="${g}" aria-label="${g === "prec" ? "Exercice précédent" : "Exercice suivant"}">${c}</button>` : "");
-    const groupe = groupeDe(nom), rec = ctx?.records?.[nom], mm = memo(nom);
-    const hp = horsProg(s, s.exos.find((e) => e.nom === nom));
-    const infos = [
-      `<div>${der ? `la dernière fois : ${esc(formatSeries(der.series))} · ${jj(der.jour)}` : "pas encore d'historique"}</div>`,
-      hp ? `<div class="g-info">→ aujourd'hui ne compte pas : la cible reste celle de la dernière fois</div>`
-        : ci ? `<div class="g-info ${ci.decharge ? "decharge" : ""}">→ ${esc(ci.texte)}</div>` : "",
-      rec?.charge ? `<div class="g-record">record ${kg(rec.charge)} kg</div>` : rec?.reps ? `<div class="g-record">record ${rec.reps} reps</div>` : "",
-      mm ? `<div class="g-memo">📌 ${esc(mm)}</div>` : "",
-    ].join("");
+    const groupe = groupeDe(nom), infos = infosGrand(nom, s);
     return `<div class="g-tete">${fl("prec", "‹")}<div class="g-titre"><b>${esc(nom)}</b>
         <span>${ss ? "⚡ superset, sans repos · " : ""}exercice ${tous.indexOf(nom) + 1} sur ${tous.length}${groupe ? ` · ${esc(groupe)}` : ""}${fini ? " · terminé ✓" : ""}</span></div>${fl("suiv", "›")}${outils}</div>
       <div class="g-infos">${infos}</div>
@@ -2786,6 +2816,7 @@ function majGrand(complet = false) {
 function clicGrand(ev) {
   const g = ev.target.closest("[data-g]")?.dataset.g;
   if (g === "liste") return quitterExercice();
+  if (g === "repos") { consulte = null; return dessiner(); }
   if (g === "une-de-plus") { plusDeFini(exoAffiche()); return dessiner(); }
   // ⋯ : l'exercice affiché ; au repos, celui annoncé ensuite (exoAffiche), sinon celui qui vient de finir.
   if (g === "menu") { const nom = exoAffiche() || minu?.nom; if (nom) ouvrirFeuille(menuExo(nom), { quoi: "menu", nom }); return; }

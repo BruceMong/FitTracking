@@ -181,19 +181,53 @@ const sansSs = (exos) => avecCtxSansSs({ "carnet:cle": "cle-essai",
   [`carnet:seance:${JOUR}`]: { doc: { jour: JOUR, type: "push", exos, note: "", maj: "2026-11-09T15:00:00Z" }, sale: false } });
 const fois = (n, c, r) => Array.from({ length: n }, () => S(c, r));
 
-test("pendant un repos, une carte touchée dans la Liste ramène à l'écran du repos, sans garder le choix", async () => {
+// Salle, 2026-11-13 : en plein repos, impossible de corriger la machine d'avant (répétitions, réserve oubliée) : la
+// carte touchée dans la Liste ramenait à l'écran du repos. Elle montre désormais cet exercice, le repos courant
+// toujours ; ses pastilles s'ouvrent pour corriger, « Retour au repos » (le chrono dedans) revient au repos.
+test("pendant un repos, une carte touchée dans la Liste montre cet exercice pour le corriger, le repos continue", async () => {
   const b = await chargerCarnet({ stockage: sansSs([{ nom: ELE, series: fois(3, 8, 12) }]) });
   b.evaluer(`dessiner(); validerSerie(${q(DC)}); allerListe(); dessiner(); allerExercice(${q(ELE)}); dessiner()`);
   assert.equal(b.json("grandVu"), true);
   assert.equal(b.json("etatGrand()"), "repos");
-  assert.equal(b.json("exoChoisi"), null);
-  // « Go » : la série suivante du développé, pas l'exercice fini touché pendant le repos
-  clicG(b, "go");
+  assert.equal(b.json("consultation()"), ELE);
+  assert.equal(b.json("exoAffiche()"), ELE);
+  assert.equal(b.json("exoGrand()"), DC);                      // le plan (et la montre) ne bougent pas
+  const html = b.json(`corpsGrand(etatGrand())`);
+  assert.match(html, new RegExp(ELE));
+  assert.equal((html.match(/class="fait" data-pastille=/g) || []).length, 3);
+  assert.match(html, /data-g="repos"[^>]*>Retour au repos <span id="g-chrono">/);
+  assert.doesNotMatch(html, /data-cocher|data-g="go"|data-min=/);
+  // une pastille ouvre la série pour la corriger, réserve comprise
+  b.evaluer(`clicGrand({ target: { closest: (sel) => sel === "[data-pastille]" ? { dataset: { pastille: "1", pn: ${q(ELE)} } } : null } })`);
+  assert.equal(b.json("feuilleOuverte.quoi"), "serie");
+  assert.equal(b.json("feuilleOuverte.nom"), ELE);
+  assert.match(b.json(`feuilleSerie(${q(ELE)}, 1, false)`), /data-f-reserve="4"/);
+  b.evaluer("fermerFeuille()");
+  // « Retour au repos » : l'écran du repos, le chrono n'a pas bougé
+  clicG(b, "repos");
+  assert.equal(b.json("consultation()"), null);
+  assert.equal(b.json("exoAffiche()"), DC);
+  assert.equal(b.json("etatGrand()"), "repos");
+});
+test("pendant un repos, la carte de l'exercice du repos ramène simplement à l'écran du repos", async () => {
+  const b = await chargerCarnet({ stockage: sansSs([{ nom: ELE, series: fois(3, 8, 12) }]) });
+  b.evaluer(`dessiner(); validerSerie(${q(DC)}); allerListe(); dessiner(); allerExercice(${q(DC)}); dessiner()`);
+  assert.equal(b.json("consultation()"), null);
+  assert.match(b.json(`corpsGrand(etatGrand())`), /data-g="go"/);
+});
+test("l'exercice corrigé pendant le repos est oublié avec ce repos : « Go » mène à la série suivante", async () => {
+  const b = await chargerCarnet({ stockage: sansSs([{ nom: ELE, series: fois(3, 8, 12) }]) });
+  b.evaluer(`dessiner(); validerSerie(${q(DC)}); allerListe(); dessiner(); allerExercice(${q(ELE)}); dessiner()`);
+  b.evaluer("passerRepos(); dessiner()");
+  assert.equal(b.json("consultation()"), null);
   assert.equal(b.json("exoAffiche()"), DC);
   const html = b.json(`corpsGrand("serie")`);
   assert.match(html, /Série 2 faite/);
   assert.doesNotMatch(html, /data-g="une-de-plus"/);
   assert.equal(b.json(`lignesDe(${q(ELE)}).st.extra`), 0);
+  // un nouveau repos ne reprend pas l'ancien choix
+  b.evaluer(`validerSerie(${q(DC)}); dessiner()`);
+  assert.equal(b.json("consultation()"), null);
 });
 test("écrans du repos : ⋯ ouvre les actions de l'exercice annoncé (le superset s'y active)", async () => {
   const b = await chargerCarnet({ stockage: sansSs([{ nom: DC, series: fois(3, 42.5, 6) }]) });
