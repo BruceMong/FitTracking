@@ -191,46 +191,114 @@ function basculerSuperset(nom) {
   return !off;
 }
 
-// Jamais deux crans d'un coup sur ces exercices : l'épaule droite (même liste que herdr-sante, PRUDENCE).
+// La règle de la cible, port fidèle de herdr-sante (prescription, capacite, pas_de, reserve_visee, plafond) :
+// mêmes constantes, mêmes textes (sans les balises de couleur). Décrite dans sport/README.md du dépôt perso,
+// « Progression : la charge calée sur la réserve ».
+// Jamais deux crans d'un coup sur ces exercices : l'épaule droite.
 const PRUDENCE = new Set(["Développé militaire"]);
+// Le carnet note la réserve de 0 à 4 : « 4 » veut dire « 4 ou plus », un minimum et non une mesure.
+const RESERVE_MAX = 4;
+// Charge la plus lourde disponible, par mot du nom d'exercice : les haltères de la salle s'arrêtent à 28 kg.
+const PLAFONDS = { "haltères": 28 };
+// Le cran des haltères (2 kg), quel que soit l'historique ; le militaire se fait aux haltères.
+const PAS_HALTERES = 2;
+const HALTERES = new Set(["Développé militaire"]);
+// Réserve visée à la première série : 2 sur un schéma lourd (8 ou moins), 1 en isolation.
+const reserveVisee = (reps) => (reps <= 8 ? 2 : 1);
+// Le moins de répétitions visées après une hausse : 75 % du schéma, arrondi (4×6 → 5, 3×12 → 9).
+const reprise = (reps) => Math.max(1, Math.trunc(reps * 0.75 + 0.5));
+function plafondDe(nom) {
+  const n = nom.toLowerCase();
+  for (const [mot, c] of Object.entries(PLAFONDS)) if (n.includes(mot)) return c;
+  return null;
+}
+// (max estimé, trop facile) à la charge la plus haute : Epley sur répétitions + réserve notée, la meilleure
+// série comptant ; « trop facile » : toutes les réserves notées à 4. Rien de noté : { cap: null, facile: false }.
+function capacite(series, rir, haut) {
+  const notes = series.map(([c, n], i) => [c, n, rir?.[i]]).filter(([c, n, x]) => c === haut && n && x != null);
+  if (!notes.length) return { cap: null, facile: false };
+  return { cap: Math.max(...notes.map(([, n, x]) => haut * (1 + (n + x) / 30))), facile: notes.every(([, , x]) => x >= RESERVE_MAX) };
+}
 
 function cible(der, nom) {
-  // Double progression, même règle que le panneau Santé (herdr-sante, cible) : charge gardée tant
-  // que le schéma n'est pas tenu à la charge la plus haute, puis charge suivante ; deux crans si
-  // tout a été tenu avec 3 répétitions en réserve. Trois séances sans progrès : décharge à −10 %,
-  // signalée par le PC (il voit tout l'historique), tant qu'aucune séance plus récente ne l'a suivie.
+  // La prochaine fois, d'après la dernière : { sens, texte, c (charge à pré-remplir), rs (répétitions par série) }.
+  // sens : monte, garde, baisse, decharge, pdc. Le PC d'abord : carnet-sync pousse la prescription de herdr-sante
+  // pour la dernière séance qu'il connaît (ctx.historique[nom].prescription) ; une séance plus récente, faite ici
+  // et pas encore repassée par le PC, est calculée sur place par la même règle.
   const series = der.series;
-  const { series: n = 4, reps = 8 } = schemaDe(nom);
+  const { series: S = 4, reps: R = 8 } = schemaDe(nom);
   const charges = series.map((s) => s[0]).filter((c) => c != null);
   if (!charges.length) return null;
+  const rendu = (sens, c, rs, texte) => ({ sens, texte, c, rs, r: Math.min(...rs),
+    monte: sens === "monte", decharge: sens === "decharge" || sens === "baisse" });
+  const h = ctx?.historique?.[nom];
+  const p = h?.jour === der.jour ? h.prescription : null;
+  if (p?.rs?.length && p.c != null) return rendu(p.sens, p.c, p.rs, h.cible || "");
   const haut = Math.max(...charges);
   const aHaut = series.filter((s) => s[0] === haut).map((s) => s[1]);
-  // `rs` : les répétitions visées série par série, reprises telles quelles par les lignes prévues
-  // (« vise 8, 8, 6 » se lit 8, 8, 6 dans les séries à faire) ; `r` reste la plus basse, pour l'ancien usage.
-  const fois = (r) => Array(n).fill(r);
+  const fois = (r) => Array(S).fill(r);
   if (haut === 0) {
-    const t = [...aHaut].sort((a, b) => b - a).slice(0, n);
+    const t = [...aHaut].sort((a, b) => b - a).slice(0, S);
     t[0] += 1;
-    while (t.length < n) t.push(t[t.length - 1]);
-    return { texte: `vise ${t[0]} à la première série`, c: 0, r: t[0], rs: t };
+    while (t.length < S) t.push(t[t.length - 1]);
+    return rendu("pdc", 0, t, `vise ${t[0]} à la première série`);
   }
-  const h = ctx?.historique?.[nom];
+  // Trois séances sans progrès : décharge à −10 %, signalée par le PC (il voit tout l'historique), tant
+  // qu'aucune séance plus récente ne l'a suivie.
   if (h?.stagne && h.decharge && h.jour === der.jour)
-    return { texte: `rien de gagné en 3 séances → décharge : ${kg(h.decharge)} kg, ${n}×${reps} sans forcer, puis on remonte`,
-             c: h.decharge, r: reps, rs: fois(reps), decharge: true };
-  if (aHaut.length >= n && Math.min(...aHaut) >= reps) {
-    // Après une hausse : 75 % du schéma, d'où l'on remonte (4×8 → 6-7, 4×6 → 5-6, 3×12 → 9-10).
-    const bas = Math.max(1, Math.round(reps * 0.75));
-    const notes = series.map((x, i) => [x[0], der.rir?.[i]]).filter(([c, e]) => c === haut && e != null).map((x) => x[1]);
-    if (notes.length >= n && Math.min(...notes) >= 3 && !PRUDENCE.has(nom))
-      return { texte: `${n}×${reps} tenu, 3 en réserve partout → deux crans (+5 kg, ou deux paires d'haltères au-dessus), vise ${n}×${bas}-${bas + 1}`, c: haut, r: bas, rs: fois(bas), monte: true };
-    return { texte: `${n}×${reps} tenu → charge suivante, vise ${n}×${bas}-${bas + 1}`, c: haut, r: bas, rs: fois(bas), monte: true };
+    return rendu("decharge", h.decharge, fois(R), `rien de gagné en 3 séances → décharge : ${kg(h.decharge)} kg, ${S}×${R} sans forcer, puis on remonte`);
+  const T = reserveVisee(R), pas = pasDe(nom), maxi = plafondDe(nom);
+  const { cap, facile } = capacite(series, der.rir, haut);
+  const ideal = cap ? cap / (1 + (R + T) / 30) : null;
+  let k = cap ? Math.trunc((ideal - haut) / pas + (ideal >= haut ? 0.5 : -0.5)) : 0;   // crans, au plus proche
+  const tenu = aHaut.length >= S && Math.min(...aHaut) >= R;
+  let pourquoi = "";
+  if (tenu || facile) {
+    k = Math.max(k, 1);
+    pourquoi = tenu ? `${S}×${R} tenu` : `${Math.max(...aHaut)} faites avec ${RESERVE_MAX}+ en réserve`;
+  } else if (k >= 1) pourquoi = "de la marge en réserve";
+  else if (k <= -1) {
+    const mini = Math.min(...series.map((x, i) => [x[0], der.rir?.[i]]).filter(([c, x]) => c === haut && x != null).map(([, x]) => x));
+    pourquoi = `${Math.max(...aHaut)} faites à ${mini} en réserve pour ${R} visées`;
   }
-  if (aHaut.length < n) return { texte: `reste à ${kg(haut)} : vise ${n} séries`, c: haut, r: reps, rs: fois(reps) };
-  const vise = [...aHaut].sort((a, b) => b - a).slice(0, n);
-  vise[vise.length - 1] = Math.min(reps, vise[vise.length - 1] + 1);
-  vise.sort((a, b) => b - a);   // 6, 6, 5, 5 → 6, 6, 6, 5 (et non 6, 6, 5, 6)
-  return { texte: `reste à ${kg(haut)} : vise ${vise.join(", ")}`, c: haut, r: vise[vise.length - 1], rs: vise };
+  if (k >= 1) {
+    k = Math.min(k, PRUDENCE.has(nom) ? 1 : 2);
+    let c = haut + k * pas;
+    if (maxi != null && c > maxi) c = maxi;
+    if (c <= haut)
+      return rendu("garde", haut, fois(R), `reste à ${kg(haut)}, les haltères les plus lourds : ajoute des répétitions, ou passe à la variante guidée`);
+    const n = Math.max(reprise(R), Math.min(R, cap ? Math.trunc(30 * (cap / c - 1) - T) : reprise(R)));
+    return rendu("monte", c, fois(n), `${pourquoi} → ${k === 2 ? "deux crans" : "un cran"} : ${kg(c)} kg, vise ${S}×${n}${n < R ? `-${n + 1}` : ""}`);
+  }
+  if (k <= -1) {
+    const c = Math.max(pas, haut + k * pas);
+    const n = Math.max(reprise(R), Math.min(R, Math.trunc(30 * (cap / c - 1) - T)));
+    return rendu("baisse", c, fois(n), `${pourquoi} → trop lourd : ${kg(c)} kg, vise ${S}×${n}`);
+  }
+  if (aHaut.length < S) return rendu("garde", haut, fois(R), `reste à ${kg(haut)} : vise ${S} séries (${aHaut.length} la dernière fois)`);
+  const vise = [...aHaut].sort((a, b) => b - a).slice(0, S);
+  vise[vise.length - 1] = Math.min(R, vise[vise.length - 1] + 1);   // la série la plus faible gagne une répétition
+  const rs = vise.map((x) => Math.min(R, x)).sort((a, b) => b - a);   // 6, 6, 5, 5 → 6, 6, 6, 5 (et non 6, 6, 5, 6)
+  return rendu("garde", haut, rs, `reste à ${kg(haut)} : vise ${rs.join(", ")}`);
+}
+
+// Autorégulation pendant la séance : la première série faite d'un exercice à charge dit si la charge du jour
+// est la bonne. 4+ en réserve : un cran au-dessus (pas au-delà du plafond) ; 0 en réserve et deux répétitions
+// ou plus sous la cible : un cran en dessous. Un seul cran, militaire compris. Rend la charge des séries
+// suivantes, ou null si rien ne change.
+function autoregulation(nom, f, vise, pas) {
+  if (!(f?.c > 0) || f.e == null) return null;
+  if (f.e >= RESERVE_MAX) {
+    const maxi = plafondDe(nom);
+    let c = f.c + pas;
+    if (maxi != null && c > maxi) c = maxi;
+    return c > f.c ? c : null;
+  }
+  if (f.e === 0 && f.r < vise - 1) {
+    const c = Math.max(pas, f.c - pas);
+    return c < f.c ? c : null;
+  }
+  return null;
 }
 
 // ───────────────────────────────────────── les lignes de séries
@@ -256,12 +324,18 @@ const serieTxt = (nom, c, r) => ({ reps: `${r} rép.`, duree: `${r} s` })[mesure
 function lignesDe(nom) {
   const e = seanceDuJour().exos.find((x) => x.nom === nom);
   const faites = e?.series || [];
-  const der = derniereFois(nom), ci = der ? cible(der, nom) : null;
+  const der = derniereFois(nom);
   const st = (saisie[nom] ||= { edits: {}, extra: 0, ech: 0, echEdits: {} });
   st.echEdits ||= {}; st.ech ||= 0;
   const mode = mesureDe(nom);
   const sc = schemaDe(nom);
   const n = sc.series;
+  // Sans historique, aucune charge proposée (c: null, « ? ») : elle est à choisir avant la première série.
+  const ci = der ? cible(der, nom) : mode === "charge" ? { sens: "premiere", c: null, r: sc.reps, rs: Array(n).fill(sc.reps),
+    texte: `première fois : prends une charge pour ~${sc.reps} répétitions à 2-3 en réserve` } : null;
+  const pas = pasDe(nom);
+  // Après la première série faite (sa réserve notée), les suivantes prennent la charge de l'autorégulation.
+  const auto = mode === "charge" && faites.length === 1 ? autoregulation(nom, faites[0], ci?.rs?.[0] ?? sc.reps, pas) : null;
   // Une ligne prévue reprend la charge travaillée, mais vise toujours les répétitions de la cible
   // pour son rang (ci.rs[k] : « vise 8, 8, 6 » donne 8, 8, 6 ; sc.reps sans cible), jamais celles
   // d'une série ratée : rater 6 au lieu de 8 ne doit pas faire proposer 6 aux séries suivantes, et la
@@ -269,7 +343,7 @@ function lignesDe(nom) {
   // ses répétitions, qui restent celles de la cible de chaque rang.
   let prec = mode === "duree" ? { c: 0, r: der?.series?.[0]?.[1] || 30 }
     : mode === "reps" ? { c: 0, r: der?.series?.[0]?.[1] || 10 }
-    : { c: faites.length ? faites[faites.length - 1].c : (ci?.c ?? der?.series?.[0]?.[0] ?? 20),
+    : { c: auto ?? (faites.length ? faites[faites.length - 1].c : (ci?.c ?? der?.series?.[0]?.[0] ?? null)),
         r: ci?.r ?? sc.reps };
   const L = faites.map((x, k) => ({ k, c: x.c, r: x.r, e: x.e, fait: true }));
   for (let j = 0; j < Math.max(0, n - faites.length) + st.extra; j++) {
@@ -282,7 +356,7 @@ function lignesDe(nom) {
   const k0 = faites.length;   // la prochaine série
   // L'échauffement : à part (e.ech), hors séries, volume, récupération et cible. Une ligne prévue
   // part de la moitié de la charge de travail × 10, puis des trois quarts × 5, au pas de l'exercice.
-  const pas = pasDe(nom), travail = L[0]?.c || 0;
+  const travail = L[0]?.c || 0;
   const faitsE = e?.ech || [];
   const W = faitsE.map((x, k) => ({ k, c: x.c, r: x.r, fait: true }));
   for (let j = 0; j < st.ech; j++) {
@@ -291,12 +365,15 @@ function lignesDe(nom) {
     W.push({ k, ...auto, ...(st.echEdits[k] || {}), fait: false });
   }
   const ks = choisie?.[0] === nom && L.some((l) => l.k === choisie[1] && l.fait) ? choisie[1] : null;
-  return { e, L, W, k0, ks, der, ci: mode === "charge" ? ci : null, n, st, pas, mode };
+  return { e, L, W, k0, ks, der, ci: mode === "charge" ? ci : null, n, st, pas, mode, auto };
 }
 
-// Le pas des boutons − / + d'un exercice : le plus petit écart entre deux charges déjà notées (un
-// cran de machine, 32 → 39 ; des haltères, 10 → 12), 2,5 kg sans historique. Le champ prend le reste.
+// Le pas des boutons − / + d'un exercice (et le cran de la cible) : 2 kg aux haltères et au militaire (même règle
+// que pas_de de herdr-sante : l'historique qui saute des paires, 22 puis 28, donnerait un cran faux) ; ailleurs le
+// plus petit écart entre deux charges déjà notées (un cran de machine, 32 → 39), 2,5 kg sans historique. Le champ
+// prend le reste.
 function pasDe(nom) {
+  if (nom.toLowerCase().includes("haltères") || HALTERES.has(nom)) return PAS_HALTERES;
   const cs = new Set();
   for (const s of toutesSeances()) for (const e of s.exos || []) if (e.nom === nom) for (const x of e.series || []) if (x.c > 0) cs.add(x.c);
   for (const [c] of ctx?.historique?.[nom]?.series || []) if (c > 0) cs.add(c);
@@ -1365,7 +1442,7 @@ function noterSerie(nom, t = new Date().toTimeString().slice(0, 8)) {
   if (e.series.length >= n) st.extra = Math.max(0, st.extra - 1);   // une série ajoutée en plus est faite
   const mode = mesureDe(nom);
   // Sans charge : c = 0 ; une tenue porte u = "s" (le PC l'écrit « 45 s » dans seances.md).
-  e.series.push({ c: mode === "charge" ? l.c : 0, r: l.r, ...(mode === "duree" ? { u: "s" } : {}), t });
+  e.series.push({ c: mode === "charge" ? l.c ?? 0 : 0, r: l.r, ...(mode === "duree" ? { u: "s" } : {}), t });
   delete st.edits[k0];
   if (s.excuse) s.excuse = null;   // finalement, séance : le jour n'est plus excusé
   choisie = null; ouvert = nom;
@@ -1396,6 +1473,12 @@ function suiteApres(nom, { e, L, k0, n }) {
 
 // La prochaine série de l'exercice, faite : depuis la carte, la vue Exercice ou la montre.
 function validerSerie(nom) {
+  // Première fois, charge pas encore choisie (« ? ») : rien n'est noté, la charge d'abord (vide = poids du corps).
+  const avant = lignesDe(nom);
+  if (avant.mode === "charge" && avant.L.find((x) => x.k === avant.k0)?.c === null) {
+    toast("Choisis d'abord la charge (« pdc » pour le poids du corps)");
+    return;
+  }
   const note = noterSerie(nom);
   if (!note) return;
   exoChoisi = null;
@@ -1959,7 +2042,7 @@ function planMontre() {
       const etape = { id: idSerie(nom), nom, quoi: quandSerie(nom) + (!ech && ssActif(nom) ? " · superset" : ""),
                       txt: cibleTxt(nom), repos: 0, ech,
                       k: ech ? (doc.exos.find((x) => x.nom === nom)?.ech?.length || 0) : l.k,
-                      c: mode === "charge" ? l.c : 0, r: l.r, u: mode === "duree" ? "s" : null,
+                      c: mode === "charge" ? l.c ?? 0 : 0, r: l.r, u: mode === "duree" ? "s" : null,
                       pas: mode === "charge" ? pas : 0 };
       // Après chaque geste, le type que sauver() recalculerait : une séance « autre » devient push dès sa
       // première série d'un exercice push, et exosAffiches (donc la suite) en dépend.
@@ -2064,7 +2147,7 @@ function appliquerGeste(brut) {
       regler(m.nom, m.k, m.ech, m.champ, m.v);
       fait = true; break;
     }
-    case "reserve": fait = noterReserve(m.nom, m.k, m.e); break;
+    case "reserve": fait = noterReserve(m.nom, m.k, m.e, { signaler: false }); break;
     case "plus1": fait = uneSerieDePlus(m.nom); break;
     case "exo": {
       // Seulement si le carnet propose le même exercice que la montre, et hors enchaînement de superset (pas de
@@ -2487,11 +2570,16 @@ function plusDeFini(nom) {
   return true;
 }
 // La réserve (0 à 4+) de la série i de l'exercice.
-function noterReserve(nom, i, e) {
+function noterReserve(nom, i, e, { signaler = true } = {}) {
   const x = seanceDuJour().exos.find((z) => z.nom === nom)?.series?.[i];
   if (!x || !Number.isInteger(e) || e < 0 || e > 4) return false;
+  const avant = i === 0 ? lignesDe(nom).auto : null;
   x.e = e; sauver();
   if (minu) garder();
+  // La réserve de la première série recale les suivantes (autoregulation) : dit discrètement.
+  const apres = i === 0 ? lignesDe(nom).auto : null;
+  if (signaler && apres != null && apres !== avant)
+    toast(`${nom} : ${apres > x.c ? `${e === 4 ? "4+" : e} en réserve, un cran de plus` : "échec sous la cible, un cran de moins"} → ${kg(apres)} kg pour la suite`);
   return true;
 }
 // La ligne (série ou échauffement) de la séance du jour notée par l'appui id (marque m === id), ou null.
@@ -2667,7 +2755,7 @@ const cibleTxt = (nom) => { const { l, mode } = aFaire(nom); return !l ? "" : mo
 // La valeur d'un réglage, à taper au clavier entre ses − / + : data-champ la branche sur l'écouteur « change » (la
 // ligne .ls donne l'exercice et la série). Charge vide = poids du corps.
 const champValeur = (champ, l, mode) => champ === "c"
-  ? `<input data-champ="c" inputmode="decimal" enterkeyhint="done" value="${l.c ? kg(l.c) : ""}" placeholder="pdc" aria-label="charge en kg">`
+  ? `<input data-champ="c" inputmode="decimal" enterkeyhint="done" value="${l.c ? kg(l.c) : ""}" placeholder="${l.c == null ? "?" : "pdc"}" aria-label="charge en kg">`
   : `<input data-champ="r" inputmode="numeric" enterkeyhint="done" value="${l.r}" aria-label="${mode === "duree" ? "secondes" : "répétitions"}">`;
 // Un champ data-champ dans el a le doigt (clavier ouvert) : el n'est pas réécrit, la saisie serait perdue.
 const saisieDans = (el) => { const a = document.activeElement; return !!a?.dataset?.champ && !!el.contains(a); };

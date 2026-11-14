@@ -16,7 +16,8 @@ export const ctxPush = {
   supersets: { [TRI]: ELE, [ELE]: TRI },
   historique: {
     [DC]: { jour: "2026-11-05", series: [[42.5, 6], [42.5, 6], [42.5, 5], [42.5, 5]] },   // cible 42,5 × 6
-    [ELE]: { jour: "2026-11-05", series: [[8, 12], [8, 12], [8, 12]] },                      // tenu → 8 × 9
+    [TRI]: { jour: "2026-11-05", series: [[20, 12], [20, 12], [20, 11]] },                  // cible 20 × 12
+    [ELE]: { jour: "2026-11-05", series: [[8, 9], [8, 9], [8, 8]] },                         // cible 8 × 9
   },
 };
 
