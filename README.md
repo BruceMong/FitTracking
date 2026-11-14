@@ -69,8 +69,9 @@ service worker) pour noter ses séries au téléphone, à la salle, même sans r
 - **Cible** (depuis le 2026-11-14) : la charge calée sur la réserve, même règle que le panneau (`prescription` de
   `herdr-sante`, décrite dans `sport/README.md` du dépôt perso). Capacité estimée sur la dernière séance (Epley sur
   répétitions + réserve), charge idéale pour le schéma avec 2 en réserve (1 en isolation), arrondie au cran ; schéma
-  tenu ou tout à 4+ en réserve : un cran au moins, deux au plus (un au militaire) ; trop lourd : on baisse ; sinon la
-  série la plus faible vise +1. Haltères : cran de 2 kg, plafond 28 kg. Trois séances sans progrès : décharge à −10 %.
+  tenu ou tout à 4+ en réserve : un cran au moins, deux au plus (un au militaire), et le schéma entier visé si tout
+  était à 4+ ; trop lourd : on baisse (jamais sur une série sans réserve notée, comptée à 0, un minimum) ; sinon la
+  série la plus faible vise +1. Poids du corps : chaque série arrêtée au schéma, une de plus partout quand il est tenu. Haltères : cran de 2 kg, plafond 28 kg. Trois séances sans progrès : décharge à −10 %.
   La charge pré-remplie est la **nouvelle** : celle que pousse le PC (`ctx.historique[nom].prescription`) pour la séance
   qu'il connaît, sinon calculée sur place (séance du téléphone pas encore synchronisée). **Première fois** : aucune charge
   proposée (« ? »), la série attend qu'on la choisisse. **Autorégulation** : après la première série d'un exercice, 4+ en

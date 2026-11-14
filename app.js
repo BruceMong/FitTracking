@@ -212,12 +212,17 @@ function plafondDe(nom) {
   for (const [mot, c] of Object.entries(PLAFONDS)) if (n.includes(mot)) return c;
   return null;
 }
-// (max estimé, trop facile) à la charge la plus haute : Epley sur répétitions + réserve notée, la meilleure
-// série comptant ; « trop facile » : toutes les réserves notées à 4. Rien de noté : { cap: null, facile: false }.
+// (max estimé, trop facile, [répétitions, réserve] de la série qui le donne) à la charge la plus haute : Epley
+// sur répétitions + réserve, la meilleure série comptant (la première en cas d'égalité). Une série sans réserve
+// notée compte avec 0, un minimum (12, 12, 9@0 ne se lit pas sur la seule série ratée). « Trop facile » : toutes
+// les réserves notées à 4. Aucune réserve notée : { cap: null, facile: false, meilleure: null }.
 function capacite(series, rir, haut) {
-  const notes = series.map(([c, n], i) => [c, n, rir?.[i]]).filter(([c, n, x]) => c === haut && n && x != null);
-  if (!notes.length) return { cap: null, facile: false };
-  return { cap: Math.max(...notes.map(([, n, x]) => haut * (1 + (n + x) / 30))), facile: notes.every(([, , x]) => x >= RESERVE_MAX) };
+  const aHaut = series.map(([c, n], i) => [c, n, rir?.[i] ?? null]).filter(([c, n]) => c === haut && n);
+  const notes = aHaut.map(([, , x]) => x).filter((x) => x != null);
+  if (!notes.length) return { cap: null, facile: false, meilleure: null };
+  let m = aHaut[0];
+  for (const y of aHaut) if (y[1] + (y[2] ?? 0) > m[1] + (m[2] ?? 0)) m = y;
+  return { cap: haut * (1 + (m[1] + (m[2] ?? 0)) / 30), facile: notes.every((x) => x >= RESERVE_MAX), meilleure: [m[1], m[2]] };
 }
 
 function cible(der, nom) {
@@ -238,17 +243,23 @@ function cible(der, nom) {
   const aHaut = series.filter((s) => s[0] === haut).map((s) => s[1]);
   const fois = (r) => Array(S).fill(r);
   if (haut === 0) {
-    const t = [...aHaut].sort((a, b) => b - a).slice(0, S);
-    t[0] += 1;
+    // Au poids du corps, le schéma vaut pour toutes les séries : s'arrêter à R garde des forces pour les
+    // suivantes (11, 6, 4, 2 → 6, 6, 6, 6) ; tenu partout, une répétition de plus par série.
+    if (aHaut.length >= S && Math.min(...aHaut) >= R)
+      return rendu("pdc", 0, fois(R + 1), `${S}×${R} tenu au poids du corps : vise ${S}×${R + 1}, ou du lest`);
+    if (Math.max(...aHaut) > R) return rendu("pdc", 0, fois(R), `vise ${S}×${R}, chaque série arrêtée à ${R}`);
+    const t = aHaut.map((x) => Math.min(R, x)).sort((a, b) => b - a).slice(0, S);
     while (t.length < S) t.push(t[t.length - 1]);
-    return rendu("pdc", 0, t, `vise ${t[0]} à la première série`);
+    t[t.indexOf(Math.min(...t))] += 1;   // la série la plus faible gagne une répétition
+    t.sort((a, b) => b - a);
+    return rendu("pdc", 0, t, `vise ${t.join(", ")}, chaque série arrêtée à ${R} au plus`);
   }
   // Trois séances sans progrès : décharge à −10 %, signalée par le PC (il voit tout l'historique), tant
   // qu'aucune séance plus récente ne l'a suivie.
   if (h?.stagne && h.decharge && h.jour === der.jour)
     return rendu("decharge", h.decharge, fois(R), `rien de gagné en 3 séances → décharge : ${kg(h.decharge)} kg, ${S}×${R} sans forcer, puis on remonte`);
   const T = reserveVisee(R), pas = pasDe(nom), maxi = plafondDe(nom);
-  const { cap, facile } = capacite(series, der.rir, haut);
+  const { cap, facile, meilleure } = capacite(series, der.rir, haut);
   const ideal = cap ? cap / (1 + (R + T) / 30) : null;
   let k = cap ? Math.trunc((ideal - haut) / pas + (ideal >= haut ? 0.5 : -0.5)) : 0;   // crans, au plus proche
   const tenu = aHaut.length >= S && Math.min(...aHaut) >= R;
@@ -257,17 +268,16 @@ function cible(der, nom) {
     k = Math.max(k, 1);
     pourquoi = tenu ? `${S}×${R} tenu` : `${Math.max(...aHaut)} faites avec ${RESERVE_MAX}+ en réserve`;
   } else if (k >= 1) pourquoi = "de la marge en réserve";
-  else if (k <= -1) {
-    const mini = Math.min(...series.map((x, i) => [x[0], der.rir?.[i]]).filter(([c, x]) => c === haut && x != null).map(([, x]) => x));
-    pourquoi = `${Math.max(...aHaut)} faites à ${mini} en réserve pour ${R} visées`;
-  }
+  else if (k <= -1 && meilleure[1] == null) k = 0;   // meilleure série sans réserve notée : 0 n'est qu'un minimum, on garde
+  else if (k <= -1) pourquoi = `${meilleure[0]} faites à ${meilleure[1]} en réserve pour ${R} visées`;
   if (k >= 1) {
     k = Math.min(k, PRUDENCE.has(nom) ? 1 : 2);
     let c = haut + k * pas;
     if (maxi != null && c > maxi) c = maxi;
     if (c <= haut)
       return rendu("garde", haut, fois(R), `reste à ${kg(haut)}, les haltères les plus lourds : ajoute des répétitions, ou passe à la variante guidée`);
-    const n = Math.max(reprise(R), Math.min(R, cap ? Math.trunc(30 * (cap / c - 1) - T) : reprise(R)));
+    // Trop facile (4+ en réserve) : la capacité n'est qu'un minimum, le schéma entier reste visé.
+    const n = facile ? R : Math.max(reprise(R), Math.min(R, cap ? Math.trunc(30 * (cap / c - 1) - T) : reprise(R)));
     return rendu("monte", c, fois(n), `${pourquoi} → ${k === 2 ? "deux crans" : "un cran"} : ${kg(c)} kg, vise ${S}×${n}${n < R ? `-${n + 1}` : ""}`);
   }
   if (k <= -1) {
